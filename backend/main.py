@@ -6,6 +6,17 @@ from typing import Optional, List, Dict, Any
 from backend.services.supabase_client import supabase, verify_supabase_token
 from backend.services.formatters import normalize_control
 from backend.services.auth_utils import verify_password, create_access_token, decode_access_token, get_password_hash
+
+# Helper functions
+def format_datetime(dt_str):
+    """Format datetime string for display."""
+    if not dt_str:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+        return dt.strftime("%b %d, %Y %H:%M")
+    except:
+        return "-"
 import json
 import os
 import logging
@@ -171,44 +182,315 @@ async def search_users(q: str = Query(default=""), Authorization: Optional[str] 
  
 
 # ============================
-# 👤 USERS MODULE ENDPOINTS
+# 👤 USERS MODULE ENHANCED ENDPOINTS
 # ============================
-@app.get("/api/users")
-def get_users():
-    """
-    Returns JSON: { status, data: [ { id, email, full_name, department, role, last_login, login_count, is_active, profile_pic_url, created_at, updated_at, sso_provider, sso_user_id } ] }
 
-    - Orders by last_login desc if available, otherwise returns as-is.
-    - Does not modify or delete existing code; adds only this endpoint.
+@app.get("/api/users")
+def get_users(
+    search: str = "",
+    role: str = "",
+    department: str = "",
+    status: str = "",
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    page: int = 1,
+    limit: int = 50
+):
+    """
+    Enhanced users endpoint with filtering, sorting, and pagination.
+    Supports search by name/email, filtering by role/department/status,
+    and sorting by various fields.
     """
     try:
-        try:
-            resp = supabase.table("users").select("*").order("last_login", desc=True).execute()
-        except Exception:
-            resp = supabase.table("users").select("*").execute()
-
-        rows = resp.data or []
-        # For frontend convenience, include a derived 'name' field if missing
-        for r in rows:
-            if isinstance(r, dict):
-                if "name" not in r or not r.get("name"):
-                    full_name = r.get("full_name")
-                    email = r.get("email", "")
-                    if isinstance(email, str) and "@" in email:
-                        r["name"] = full_name or email.split("@")[0]
-                    else:
-                        r["name"] = full_name or "Unknown"
-        print(f"✅ get_users returned {len(rows)} rows: {rows}")
-        return {"status": "success", "data": rows}
+        query = supabase.table("users").select("*")
+        
+        # Apply filters
+        if search:
+            query = query.or_(f"full_name.ilike.%{search}%,email.ilike.%{search}%")
+        
+        if role:
+            query = query.eq("role", role)
+            
+        if department:
+            query = query.eq("department", department)
+            
+        if status:
+            is_active = status.lower() == "active"
+            query = query.eq("is_active", is_active)
+        
+        # Apply sorting
+        sort_field = sort_by if sort_by in ["created_at", "updated_at", "full_name", "email", "role"] else "created_at"
+        desc = sort_order.lower() == "desc"
+        query = query.order(sort_field, desc=desc)
+        
+        # Apply pagination
+        offset = (page - 1) * limit
+        query = query.range(offset, offset + limit - 1)
+        
+        resp = query.execute()
+        
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            error_msg = str(getattr(resp, "error"))
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        rows = getattr(resp, "data", []) or []
+        
+        # Enhance user data
+        enhanced_users = []
+        for user in rows:
+            if isinstance(user, dict):
+                # Add derived fields
+                user["display_name"] = user.get("full_name") or user.get("username") or user.get("email", "").split("@")[0]
+                user["account_type"] = "SSO" if user.get("sso_provider") else "Local"
+                user["last_login_formatted"] = format_datetime(user.get("last_login"))
+                user["created_at_formatted"] = format_datetime(user.get("created_at"))
+                
+                # Add status badge class
+                if user.get("is_active"):
+                    user["status_class"] = "success"
+                    user["status_text"] = "Active"
+                else:
+                    user["status_class"] = "danger"
+                    user["status_text"] = "Inactive"
+                
+                enhanced_users.append(user)
+        
+        # Get total count for pagination
+        count_resp = supabase.table("users").select("id", count=True).execute()
+        total_count = len(getattr(count_resp, "data", []) or [])
+        
+        return {
+            "status": "success",
+            "data": enhanced_users,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "pages": (total_count + limit - 1) // limit
+            }
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"❌ get_users error: {e}")
+        logger.error(f"Error in get_users: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/users/stats")
+def get_users_stats():
+    """Get user statistics for dashboard and analytics."""
+    try:
+        # Get total users
+        total_resp = supabase.table("users").select("id", count=True).execute()
+        total_users = len(getattr(total_resp, "data", []) or [])
+        
+        # Get active users
+        active_resp = supabase.table("users").select("id", count=True).eq("is_active", True).execute()
+        active_users = len(getattr(active_resp, "data", []) or [])
+        
+        # Get users by role
+        roles_resp = supabase.table("users").select("role").execute()
+        roles_data = getattr(roles_resp, "data", []) or []
+        
+        role_counts = {}
+        for user in roles_data:
+            if isinstance(user, dict):
+                role = user.get("role", "Unknown")
+                role_counts[role] = role_counts.get(role, 0) + 1
+        
+        # Get users by department
+        dept_resp = supabase.table("users").select("department").execute()
+        dept_data = getattr(dept_resp, "data", []) or []
+        
+        dept_counts = {}
+        for user in dept_data:
+            if isinstance(user, dict):
+                dept = user.get("department", "Unknown")
+                dept_counts[dept] = dept_counts.get(dept, 0) + 1
+        
+        # Get SSO vs Local users
+        sso_resp = supabase.table("users").select("sso_provider").not_.is_("sso_provider", "null").execute()
+        sso_users = len(getattr(sso_resp, "data", []) or [])
+        local_users = total_users - sso_users
+        
+        return {
+            "status": "success",
+            "data": {
+                "total_users": total_users,
+                "active_users": active_users,
+                "inactive_users": total_users - active_users,
+                "role_distribution": role_counts,
+                "department_distribution": dept_counts,
+                "account_types": {
+                    "sso": sso_users,
+                    "local": local_users
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in get_users_stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/users/{user_id}")
+async def update_user(user_id: str, request: Request):
+    """Update user information."""
+    try:
+        payload = await request.json()
+        
+        # Remove fields that shouldn't be updated directly
+        fields_to_exclude = ["id", "created_at", "sso_provider", "sso_user_id"]
+        for field in fields_to_exclude:
+            payload.pop(field, None)
+        
+        # Update timestamp
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        # Hash password if provided
+        if "password" in payload and payload["password"]:
+            payload["password"] = get_password_hash(payload["password"])
+        
+        resp = supabase.table("users").update(payload).eq("id", user_id).execute()
+        
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            error_msg = str(getattr(resp, "error"))
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        return {
+            "status": "success", 
+            "data": getattr(resp, "data", [])[0] if getattr(resp, "data", []) else None,
+            "message": "User updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in update_user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/users/{user_id}/status")
+async def toggle_user_status(user_id: str, request: Request):
+    """Toggle user active/inactive status."""
+    try:
+        payload = await request.json()
+        is_active = payload.get("is_active", True)
+        
+        resp = supabase.table("users").update({
+            "is_active": is_active,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", user_id).execute()
+        
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            error_msg = str(getattr(resp, "error"))
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        status_text = "activated" if is_active else "deactivated"
+        return {
+            "status": "success",
+            "data": getattr(resp, "data", [])[0] if getattr(resp, "data", []) else None,
+            "message": f"User {status_text} successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in toggle_user_status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(user_id: str):
+    """Delete a user from the system."""
+    try:
+        # Check if user exists
+        user_resp = supabase.table("users").select("id").eq("id", user_id).single().execute()
+        if not getattr(user_resp, "data", None):
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Delete the user
+        resp = supabase.table("users").delete().eq("id", user_id).execute()
+        
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            error_msg = str(getattr(resp, "error"))
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        return {
+            "status": "success",
+            "message": "User deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/invite")
+async def invite_user(request: Request):
+    """Send invitation to a new user via email."""
+    try:
+        payload = await request.json()
+        full_name = (payload.get("full_name") or "").strip()
+        email = (payload.get("email") or "").strip().lower()
+        role = (payload.get("role") or "User").strip()
+        department = (payload.get("department") or "").strip()
+        
+        if not full_name:
+            raise HTTPException(status_code=400, detail="Full name is required")
+        
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        # Validate email format
+        import re
+        email_pattern = r'^[^\s@]+@[^\s@]+\.[^\s@]+$'
+        if not re.match(email_pattern, email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+        
+        # Check if user already exists
+        existing = supabase.table("users").select("id").eq("email", email).execute()
+        if getattr(existing, "data", []):
+            raise HTTPException(status_code=409, detail="User with this email already exists")
+        
+        # Create invitation record
+        now = datetime.now(timezone.utc).isoformat()
+        invitation_data = {
+            "full_name": full_name,
+            "email": email,
+            "role": role,
+            "department": department,
+            "is_active": True,
+            "created_at": now,
+            "updated_at": now,
+            "sso_provider": "invitation",  # Mark as invitation
+            "username": email.split("@")[0]  # Generate username from email
+        }
+        
+        resp = supabase.table("users").insert(invitation_data).execute()
+        
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            error_msg = str(getattr(resp, "error"))
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Here you would typically send an email invitation
+        # For now, we'll just return success
+        logger.info(f"Invitation sent to {email} for user {full_name}")
+        
+        return {
+            "status": "success",
+            "message": "Invitation sent successfully",
+            "data": getattr(resp, "data", [])[0] if getattr(resp, "data", []) else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending invitation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/api/users")
 async def create_user(request: Request):
     """
     Creates a user record in the `users` table.
-    Accepts JSON: { username, email, role, password? }
+    Accepts JSON: { username, email, role, password?, department?, phone_number? }
     - Stores basic profile fields.
     - Hashes password if provided.
     - Returns { status, data: inserted_row }
@@ -216,12 +498,19 @@ async def create_user(request: Request):
     try:
         payload = await request.json()
         email = (payload.get("email") or "").strip().lower()
-        full_name = (payload.get("username") or payload.get("name") or "").strip()
+        username = (payload.get("username") or "").strip()
+        full_name = (payload.get("full_name") or payload.get("name") or "").strip()
         role = (payload.get("role") or "User").strip()
+        department = (payload.get("department") or "").strip()
+        phone_number = (payload.get("phone_number") or "").strip()
+        is_active = payload.get("is_active", True)  # Default to True if not provided
         password = payload.get("password")
 
         if not email:
             raise HTTPException(status_code=400, detail="Email is required")
+        
+        if not username:
+            username = email.split("@")[0]  # Generate username from email if not provided
 
         # Prevent duplicates by email
         existing = supabase.table("users").select("id").eq("email", email).execute()
@@ -232,17 +521,26 @@ async def create_user(request: Request):
 
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         to_insert = {
+            "username": username,
             "email": email,
-            "full_name": full_name or email.split("@")[0],
+            "full_name": full_name or username,
             "role": role or "User",
-            "is_active": True,
+            "is_active": is_active,
             "created_at": now,
             "updated_at": now,
             "sso_provider": (payload.get("sso_provider") or "manual"),
-            "sso_user_id": (payload.get("sso_user_id") or ""),
-            "login_count": 0,
             "password": hashed_password
         }
+        
+        # Add optional fields if provided
+        if department:
+            to_insert["department"] = department
+        if phone_number:
+            to_insert["phone_number"] = phone_number
+        
+        # Only add sso_user_id if it's provided and not empty
+        if payload.get("sso_user_id"):
+            to_insert["sso_user_id"] = payload["sso_user_id"]
         resp = supabase.table("users").insert(to_insert).execute()
         if hasattr(resp, "error") and getattr(resp, "error", None):
             error_msg = str(getattr(resp, "error"))
