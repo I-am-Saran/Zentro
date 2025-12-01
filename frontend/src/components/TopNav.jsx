@@ -7,7 +7,7 @@ import {
   ShieldCheck,
   LogOut,
   ChevronRight,
-  Key,
+  LayoutDashboard,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -18,27 +18,28 @@ export default function TopNav({ open, onClose }) {
   const handleLogout = async () => {
     try {
       // Attempt local and global sign-out to clear any residual sessions
-      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
-      await supabase.auth.signOut({ scope: "global" }).catch(() => {});
+      await supabase.auth.signOut({ scope: "local" }).catch(() => { });
+      await supabase.auth.signOut({ scope: "global" }).catch(() => { });
     } finally {
       // Clear persisted auth and app state regardless of API result
       try {
         Object.keys(localStorage)
           .filter((k) => k.startsWith("sb-"))
           .forEach((k) => localStorage.removeItem(k));
-      } catch {}
-      try { localStorage.clear(); } catch {}
-      try { sessionStorage.clear(); } catch {}
+      } catch { }
+      try { localStorage.clear(); } catch { }
+      try { sessionStorage.clear(); } catch { }
 
       // Navigate and force reload to guarantee a clean slate
       navigate("/login", { replace: true });
       setTimeout(() => {
-        try { window.location.replace("/login"); } catch {}
+        try { window.location.replace("/login"); } catch { }
       }, 50);
     }
   };
 
   const navItems = [
+    { to: "/", icon: LayoutDashboard, label: "Dashboard" },
     { to: "/bugs", icon: Bug, label: "Bugs" },
     { to: "/tasks", icon: ListTodo, label: "Tasks" },
     { to: "/transtracker", icon: ListTodo, label: "Transtracker" },
@@ -49,9 +50,8 @@ export default function TopNav({ open, onClose }) {
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 w-64 bg-gradient-to-b from-primary via-primary to-primaryDark text-white shadow-2xl transform transition-transform duration-300 z-30 flex flex-col justify-between ${
-        open ? "translate-x-0" : "-translate-x-full sm:translate-x-0"
-      }`}
+      className={`fixed inset-y-0 left-0 w-64 bg-gradient-to-b from-primary via-primary to-primaryDark text-white shadow-2xl transform transition-transform duration-300 z-30 flex flex-col justify-between ${open ? "translate-x-0" : "-translate-x-full sm:translate-x-0"
+        }`}
     >
       {/* Top section */}
       <div>
@@ -81,10 +81,9 @@ export default function TopNav({ open, onClose }) {
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200 ${
-                  isActive 
-                    ? "bg-gradient-to-r from-accent/30 to-accent/20 text-white shadow-lg shadow-accent/20 border-l-4 border-accent" 
-                    : "text-white/80 hover:text-white hover:bg-white/10"
+                `flex items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive
+                  ? "bg-gradient-to-r from-accent/30 to-accent/20 text-white shadow-lg shadow-accent/20 border-l-4 border-accent"
+                  : "text-white/80 hover:text-white hover:bg-white/10"
                 }`
               }
               onClick={onClose}
