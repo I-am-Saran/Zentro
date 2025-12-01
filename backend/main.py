@@ -1,11 +1,33 @@
 # backend/main.py
-from fastapi import FastAPI, HTTPException, Request, Header, Query, File, UploadFile, Path
+from fastapi import FastAPI, HTTPException, Request, Header, Query, File, UploadFile, Path, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-from backend.services.supabase_client import supabase, verify_supabase_token
-from backend.services.formatters import normalize_control
-from backend.services.auth_utils import verify_password, create_access_token, decode_access_token, get_password_hash
+from typing import Optional, List, Dict, Any, Union
+from services.supabase_client import supabase, supabase_admin, verify_supabase_token
+from services.formatters import normalize_control
+from datetime import datetime, timezone
+
+class Role(BaseModel):
+    id: str
+    role_name: str
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class Module(BaseModel):
+    id: str
+    module_name: str
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+from services.auth_utils import verify_password, create_access_token, decode_access_token, get_password_hash
+from middleware.rbac_middleware import (
+    require_permission, 
+    require_any_permission, 
+    require_all_permissions,
+    require_role,
+    require_any_role
+)
 
 # Helper functions
 def format_datetime(dt_str):
@@ -22,7 +44,6 @@ import os
 import logging
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime, timezone
 import time
 
 
@@ -47,6 +68,70 @@ async def get_controls():
         data = resp.data or []
         formatted = [normalize_control(row) for row in data]
         return {"status": "success", "data": formatted}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/roles/{role_id}/modules")
+async def get_role_modules(role_id: str):
+    """
+    Retrieve modules associated with a specific role.
+    """
+    try:
+        resp = supabase.table("role_module_access").select("module_id").eq("role_id", role_id).execute()
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, "error")))
+
+        items = getattr(resp, "data", []) or []
+        module_ids = [item.get("module_id") for item in items if isinstance(item, dict) and item.get("module_id") is not None]
+
+        modules_resp = supabase.table("modules").select("module_name").in_("id", module_ids).execute()
+        if hasattr(modules_resp, "error") and getattr(modules_resp, "error", None):
+            raise HTTPException(status_code=400, detail=str(getattr(modules_resp, "error")))
+
+        mods_data = getattr(modules_resp, "data", []) or []
+        module_names = [item.get("module_name") for item in mods_data if isinstance(item, dict)]
+        return {"status": "success", "data": module_names}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/roles/{role_id}/modules")
+async def update_role_modules(role_id: str, module_names: List[str]):
+    """
+    Update modules associated with a specific role.
+    """
+    try:
+        # First, get module IDs from module names
+        modules_resp = supabase.table("modules").select("id, module_name").in_("module_name", module_names).execute()
+        if hasattr(modules_resp, "error") and getattr(modules_resp, "error", None):
+            raise HTTPException(status_code=400, detail=str(getattr(modules_resp, "error")))
+        
+        module_name_to_id = {}
+        for item in getattr(modules_resp, "data", []) or []:
+            if isinstance(item, dict):
+                name = item.get("module_name")
+                id_val = item.get("id")
+                if isinstance(name, str) and id_val is not None:
+                    module_name_to_id[name] = str(id_val)
+        module_ids_to_add = [module_name_to_id[name] for name in module_names if name in module_name_to_id]
+
+        # Delete existing role_module_access entries for this role
+        delete_resp = supabase.table("role_module_access").delete().eq("role_id", role_id).execute()
+        if hasattr(delete_resp, "error") and getattr(delete_resp, "error", None):
+            raise HTTPException(status_code=400, detail=str(getattr(delete_resp, "error")))
+
+        # Insert new role_module_access entries
+        if module_ids_to_add:
+            insert_data = [{
+                "role_id": role_id,
+                "module_id": module_id,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            } for module_id in module_ids_to_add]
+            
+            insert_resp = supabase.table("role_module_access").insert(insert_data).execute()
+            if hasattr(insert_resp, "error") and getattr(insert_resp, "error", None):
+                raise HTTPException(status_code=400, detail=str(getattr(insert_resp, "error")))
+
+        return {"status": "success", "message": "Role module access updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -181,9 +266,53 @@ async def search_users(q: str = Query(default=""), Authorization: Optional[str] 
 
  
 
-# ============================
+# ===========================
 # 👤 USERS MODULE ENHANCED ENDPOINTS
 # ============================
+
+# ===========================
+# 🔑 ROLES AND PERMISSIONS MANAGEMENT
+# ===========================
+
+@app.get("/api/roles", response_model=List[Role])
+async def get_roles():
+    """
+    Retrieve all roles from the database.
+    """
+    try:
+        resp = supabase.table("roles").select("*").execute()
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, "error")))
+        roles = getattr(resp, "data", []) or []
+        return {"status": "success", "data": roles, "total": len(roles)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/modules", response_model=List[Module])
+async def get_modules():
+    """
+    Retrieve all modules from the database.
+    """
+    try:
+        resp = supabase.table("modules").select("*").execute()
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, "error")))
+        modules = getattr(resp, "data", []) or []
+        if not modules:
+            # Fallback: derive modules from permissions table
+            p_resp = supabase.table("permissions").select("module").execute()
+            p_data = getattr(p_resp, "data", []) or []
+            module_names = set()
+            for row in p_data:
+                if isinstance(row, dict):
+                    module = row.get("module")
+                    if isinstance(module, str) and module:
+                        module_names.add(module)
+            names = sorted(module_names)
+            modules = [{"module_name": name} for name in names]
+        return {"status": "success", "data": modules, "total": len(modules)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/users")
 def get_users(
@@ -256,7 +385,7 @@ def get_users(
                 enhanced_users.append(user)
         
         # Get total count for pagination
-        count_resp = supabase.table("users").select("id", count=True).execute()
+        count_resp = supabase.table("users").select("id").execute()
         total_count = len(getattr(count_resp, "data", []) or [])
         
         return {
@@ -281,11 +410,11 @@ def get_users_stats():
     """Get user statistics for dashboard and analytics."""
     try:
         # Get total users
-        total_resp = supabase.table("users").select("id", count=True).execute()
+        total_resp = supabase.table("users").select("id").execute()
         total_users = len(getattr(total_resp, "data", []) or [])
         
         # Get active users
-        active_resp = supabase.table("users").select("id", count=True).eq("is_active", True).execute()
+        active_resp = supabase.table("users").select("id").eq("is_active", True).execute()
         active_users = len(getattr(active_resp, "data", []) or [])
         
         # Get users by role
@@ -552,129 +681,10 @@ async def create_user(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/users/{user_id}")
-def delete_user(user_id: str):
-    """
-    Deletes a user by `id` or `email` from the `users` table.
-    Returns { status } when deletion succeeds.
-    """
-    try:
-        # Try by numeric id first
-        deleted = False
-        try:
-            uid_int = int(user_id)
-            resp = supabase.table("users").delete().eq("id", uid_int).execute()
-            if (getattr(resp, "data", None) or []):
-                deleted = True
-        except Exception:
-            pass
-
-        if not deleted:
-            # Fallback: try by id as string and email
-            resp = supabase.table("users").delete().eq("id", user_id).execute()
-            if not (getattr(resp, "data", None) or []):
-                resp = supabase.table("users").delete().eq("email", user_id).execute()
-            if (getattr(resp, "data", None) or []):
-                deleted = True
-
-        if not deleted:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        return {"status": "success"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/invite")
-async def invite_user(request: Request):
-    """
-    Sends an invitation email via Supabase Admin if available; also upserts a user row.
-    Accepts JSON: { email, name, role }
-    Returns { status, message }
-    """
-    try:
-        payload = await request.json()
-        email = (payload.get("email") or "").strip().lower()
-        name = (payload.get("name") or "").strip()
-        role = (payload.get("role") or "User").strip()
-
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required")
-
-        # Try Supabase Admin invite (requires service role key)
-        try:
-            admin = getattr(supabase, "auth", None)
-            admin = getattr(admin, "admin", None)
-            if admin and hasattr(admin, "invite_user_by_email"):
-                resp = admin.invite_user_by_email(email)
-                if getattr(resp, "error", None):
-                    logging.warning(f"Supabase admin invite error: {resp.error}")
-                else:
-                    logging.info(f"Invitation queued for {email}")
-            else:
-                logging.warning("Supabase admin invite not available in client")
-        except Exception as e:
-            logging.warning(f"Admin invite attempt failed: {e}")
-
-        # Attempt direct SMTP email as a fallback
-        email_sent = False
-        try:
-            smtp_host = os.getenv("SMTP_HOST")
-            smtp_port = int(os.getenv("SMTP_PORT", "587"))
-            smtp_user = os.getenv("SMTP_USER")
-            smtp_pass = os.getenv("SMTP_PASS")
-            smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@example.com")
-
-            if smtp_host and smtp_from:
-                msg = EmailMessage()
-                msg["Subject"] = "You’re invited to Alchemy GRC"
-                msg["From"] = smtp_from
-                msg["To"] = email
-                msg.set_content(
-                    f"Hello {name or email},\n\n" \
-                    f"You have been invited to Alchemy GRC with role '{role}'. " \
-                    f"Please check your inbox for the Supabase invite.\n\n" \
-                    f"Thanks,\nAlchemy Team"
-                )
-
-                with smtplib.SMTP(smtp_host, smtp_port) as server:
-                    server.starttls()
-                    if smtp_user and smtp_pass:
-                        server.login(smtp_user, smtp_pass)
-                    server.send_message(msg)
-                email_sent = True
-            else:
-                logging.info("SMTP not configured; skipping direct email send")
-        except Exception as e:
-            logging.warning(f"SMTP send failed: {e}")
-
-        # Upsert into users table as inactive until first login
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        upsert = {
-            "email": email,
-            "full_name": name or email.split("@")[0],
-            "role": role,
-            "is_active": False,
-            "created_at": now,
-            "updated_at": now,
-            "sso_provider": "",
-            "sso_user_id": payload.get("sso_user_id") or "",
-            "login_count": 0,
-        }
-        supabase.table("users").upsert(upsert).execute()
-
-        return {"status": "success", "message": "Invitation processed", "email_sent": email_sent}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
 # ============================
 # 🪲 BUGS MODULE ENDPOINTS (FINAL, STABLE, PRODUCTION-READY)
 # ============================
 
-# Normalizer for rows (defensive)
 def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
     """Normalizes bug row data to standard format."""
     try:
@@ -697,6 +707,51 @@ def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
             "Changed": "",
             "Product": "",
         }
+# Candidate table names to try (helps if your environment used a slightly different name)
+# Prefer canonical 'bugs' first; include legacy fallbacks where some environments used
+# different names. Avoid uppercase 'Bugs' which often doesn't exist.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # Upsert into users table as inactive until first login
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        upsert = {
+            "email": email,
+            "full_name": name or email.split("@")[0],
+            "role": role,
+            "is_active": False,
+            "created_at": now,
+            "updated_at": now,
+            "sso_provider": "",
+            "sso_user_id": payload.get("sso_user_id") or "",
+            "login_count": 0,
+        }
+        supabase.table("users").upsert(upsert).execute()
+
+        return {"status": "success", "message": "Invitation processed", "email_sent": email_sent}
+    
+# ============================
+# 🪲 BUGS MODULE ENDPOINTS (FINAL, STABLE, PRODUCTION-READY)
+# ============================
 
 # Candidate table names to try (helps if your environment used a slightly different name)
 # Prefer canonical 'bugs' first; include legacy fallbacks where some environments used
@@ -942,7 +997,7 @@ class TranstrackerEntry(BaseModel):
 async def create_transtracker(entry: TranstrackerEntry):
     """Create a new transtracker entry."""
     try:
-        data_dict = entry.dict()
+        data_dict = entry.model_dump()
         resp = supabase.table("transtrackers").insert(data_dict).execute()
         if hasattr(resp, "error") and getattr(resp, "error", None):
             error_msg = str(getattr(resp, "error"))
@@ -1319,7 +1374,585 @@ async def root():
     return {"status": "ok", "service": "transtracker"}
 
 
+# ===========================
+# PERMISSIONS & ROLES API
+# ===========================
+
+# Pydantic models for permissions
+class PermissionBase(BaseModel):
+    permission_name: str
+    permission_code: str
+    description: Optional[str] = None
+    module: str
+    action: str
+    resource: Optional[str] = None
+
+class PermissionCreate(PermissionBase):
+    pass
+
+class PermissionUpdate(BaseModel):
+    permission_name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class RolePermissionAssign(BaseModel):
+    permission_id: int
+    is_active: bool = True
+    expires_at: Optional[datetime] = None
+
+class RolePermissionBulkAssign(BaseModel):
+    role_id: int
+    permission_ids: List[int]
+    granted_by: Optional[int] = None
+
+class UserPermissionAssign(BaseModel):
+    user_id: str
+    permission_id: int
+    is_active: bool = True
+    expires_at: Optional[datetime] = None
+
+# ===========================
+# PERMISSIONS MANAGEMENT
+# ===========================
+
+@app.get("/api/permissions")
+async def get_permissions(
+    module: Optional[str] = Query(None, description="Filter by module"),
+    action: Optional[str] = Query(None, description="Filter by action"),
+    is_active: Optional[bool] = Query(True, description="Filter by active status"),
+    search: Optional[str] = Query(None, description="Search in name or description")
+):
+    """Get all permissions with optional filtering."""
+    try:
+        query = supabase.table("permissions").select("*")
+        
+        if module:
+            query = query.eq("module", module)
+        if action:
+            query = query.eq("action", action)
+        if is_active is not None:
+            query = query.eq("is_active", is_active)
+        if search:
+            query = query.or_(f"permission_name.ilike.%{search}%,description.ilike.%{search}%")
+        
+        query = query.order("module", desc=False).order("permission_name", desc=False)
+        resp = query.execute()
+        
+        if hasattr(resp, 'error') and getattr(resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, 'error')))
+        
+        permissions = getattr(resp, 'data', []) or []
+        
+        # Group by module for better organization
+        permissions_by_module = {}
+        for perm in permissions:
+            module_name = perm.get('module', 'Other')
+            if module_name not in permissions_by_module:
+                permissions_by_module[module_name] = []
+            permissions_by_module[module_name].append(perm)
+        
+        return {
+            "status": "success",
+            "data": permissions,
+            "grouped": permissions_by_module,
+            "total": len(permissions)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching permissions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/permissions")
+@require_permission("permissions.create")
+async def create_permission(permission: PermissionCreate, current_user: dict = Depends(verify_supabase_token)):
+    """Create a new permission - requires permissions.create permission."""
+    try:
+        
+        # Check if permission code already exists
+        existing = supabase.table("permissions").select("id").eq("permission_code", permission.permission_code).execute()
+        if existing.data:
+            raise HTTPException(status_code=400, detail="Permission code already exists")
+        
+        # Create permission
+        permission_data = permission.model_dump()
+        permission_data["created_at"] = datetime.now(timezone.utc).isoformat()
+        permission_data["updated_at"] = permission_data["created_at"]
+        
+        resp = supabase.table("permissions").insert(permission_data).execute()
+        
+        if hasattr(resp, 'error') and getattr(resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, 'error')))
+        
+        new_permission = resp.data[0] if resp.data else None
+        
+        # Log the action
+        logger.info(f"Permission created: {permission.permission_code}")
+        
+        return {
+            "status": "success",
+            "message": "Permission created successfully",
+            "data": new_permission
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating permission: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/permissions/{permission_id}")
+@require_permission("permissions.update")
+async def update_permission(
+    permission_id: int, 
+    permission: PermissionUpdate,
+    current_user: dict = Depends(verify_supabase_token)
+):
+    """Update a permission - requires permissions.update permission."""
+    try:
+        
+        update_data = permission.dict(exclude_unset=True)
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        resp = supabase.table("permissions").update(update_data).eq("id", permission_id).execute()
+        
+        if hasattr(resp, 'error') and getattr(resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, 'error')))
+        
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="Permission not found")
+        
+        logger.info(f"Permission updated: {permission_id}")
+        
+        return {
+            "status": "success",
+            "message": "Permission updated successfully",
+            "data": resp.data[0] if resp.data and len(resp.data) > 0 else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating permission: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===========================
+# ROLE PERMISSIONS MANAGEMENT
+# ===========================
+
+@app.get("/api/roles/{role_id}/permissions")
+async def get_role_permissions(role_id: int):
+    """Get all permissions assigned to a specific role."""
+    try:
+        # Get role info
+        role_resp = supabase.table("roles").select("*").eq("id", role_id).execute()
+        if not role_resp.data:
+            raise HTTPException(status_code=404, detail="Role not found")
+        
+        role = role_resp.data[0]
+        
+        # Get permissions for this role
+        permissions_resp = supabase.table("role_permissions").select("""
+            *,
+            permissions!inner(*)
+        """).eq("role_id", role_id).eq("is_active", True).execute()
+        
+        if hasattr(permissions_resp, 'error') and getattr(permissions_resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(permissions_resp, 'error')))
+        
+        role_permissions = permissions_resp.data or []
+        
+        # Group by module
+        permissions_by_module = {}
+        for rp in role_permissions:
+            if isinstance(rp, dict):
+                perm = rp.get('permissions', {})
+                if perm and isinstance(perm, dict):
+                    module_name = perm.get('module', 'Other')
+                    if module_name not in permissions_by_module:
+                        permissions_by_module[module_name] = []
+                    permissions_by_module[module_name].append({
+                        "id": rp.get('id'),
+                        "permission": perm,
+                        "granted_at": rp.get('granted_at'),
+                        "expires_at": rp.get('expires_at')
+                    })
+        
+        return {
+            "status": "success",
+            "role": role,
+            "permissions": role_permissions,
+            "grouped_permissions": permissions_by_module,
+            "total_permissions": len(role_permissions)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching role permissions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/roles/{role_id}/permissions")
+@require_permission("roles.manage")
+async def assign_permission_to_role(
+    role_id: int,
+    assignment: RolePermissionAssign,
+    current_user: dict = Depends(verify_supabase_token)
+):
+    """Assign a permission to a role - requires roles.manage permission."""
+    try:
+        
+        # Check if role exists
+        role_resp = supabase.table("roles").select("id").eq("id", role_id).execute()
+        if not role_resp.data:
+            raise HTTPException(status_code=404, detail="Role not found")
+        
+        # Check if permission exists
+        perm_resp = supabase.table("permissions").select("id").eq("id", assignment.permission_id).execute()
+        if not perm_resp.data:
+            raise HTTPException(status_code=404, detail="Permission not found")
+        
+        # Check if assignment already exists
+        existing = supabase.table("role_permissions").select("id").eq("role_id", role_id).eq("permission_id", assignment.permission_id).execute()
+        
+        if existing.data and len(existing.data) > 0:
+            # Update existing assignment
+            update_data = {
+                "is_active": assignment.is_active,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            if assignment.expires_at:
+                update_data["expires_at"] = assignment.expires_at.isoformat()
+            
+            assignment_id = existing.data[0].get("id") if isinstance(existing.data[0], dict) else None
+            if not assignment_id:
+                raise HTTPException(status_code=400, detail="Invalid assignment ID")
+                
+            resp = supabase.table("role_permissions").update(update_data).eq("id", assignment_id).execute()
+        else:
+            # Create new assignment
+            assignment_data = {
+                "role_id": role_id,
+                "permission_id": assignment.permission_id,
+                "is_active": assignment.is_active,
+                "granted_at": datetime.now(timezone.utc).isoformat(),
+                "granted_by": 1  # Should be current user ID from token
+            }
+            if assignment.expires_at:
+                assignment_data["expires_at"] = assignment.expires_at.isoformat()
+            
+            resp = supabase.table("role_permissions").insert(assignment_data).execute()
+        
+        if hasattr(resp, 'error') and getattr(resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, 'error')))
+        
+        logger.info(f"Permission {assignment.permission_id} assigned to role {role_id}")
+        
+        return {
+            "status": "success",
+            "message": "Permission assigned successfully",
+            "data": resp.data[0] if resp.data else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning permission to role: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/roles/{role_id}/permissions/{permission_id}")
+@require_permission("roles.manage")
+async def remove_permission_from_role(
+    role_id: int,
+    permission_id: int,
+    current_user: dict = Depends(verify_supabase_token)
+):
+    """Remove a permission from a role - requires roles.manage permission."""
+    try:
+        
+        resp = supabase.table("role_permissions").delete().eq("role_id", role_id).eq("permission_id", permission_id).execute()
+        
+        if hasattr(resp, 'error') and getattr(resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, 'error')))
+        
+        logger.info(f"Permission {permission_id} removed from role {role_id}")
+        
+        return {
+            "status": "success",
+            "message": "Permission removed successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing permission from role: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===========================
+# USER PERMISSIONS CHECK
+# ===========================
+
+@app.get("/api/users/{user_id}/permissions")
+async def get_user_permissions(user_id: str, authorization: Optional[str] = Header(None)):
+    """Get all permissions for a specific user (includes role + direct permissions)."""
+    try:
+        # Verify access - users can view their own permissions, admins can view any
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        
+        token_data = verify_supabase_token(authorization)
+        if not token_data:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        current_user_id = token_data.get("user", {}).get("id")
+        if not current_user_id:
+            raise HTTPException(status_code=401, detail="Invalid token data")
+        
+        # Users can only view their own permissions unless they're admin
+        if current_user_id != user_id:
+            # Check if current user is admin
+            user_resp = supabase.table("users").select("role").eq("id", current_user_id).execute()
+            if not user_resp.data or len(user_resp.data) == 0:
+                raise HTTPException(status_code=404, detail="Current user not found")
+            
+            user_role_id = user_resp.data[0].get("role") if isinstance(user_resp.data[0], dict) else None
+            if not user_role_id:
+                raise HTTPException(status_code=404, detail="User role not found")
+                
+            role_resp = supabase.table("roles").select("role_name").eq("id", user_role_id).execute()
+            if not role_resp.data or len(role_resp.data) == 0 or (isinstance(role_resp.data[0], dict) and role_resp.data[0].get("role_name") != "Admin"):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        
+        # Get user permissions using the view
+        resp = supabase.table("user_permissions_view").select("*").eq("user_id", user_id).execute()
+        
+        if hasattr(resp, 'error') and getattr(resp, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(resp, 'error')))
+        
+        permissions = resp.data or []
+        
+        # Group by module
+        permissions_by_module = {}
+        for perm in permissions:
+            if isinstance(perm, dict):
+                module_name = perm.get('module', 'Other')
+                if module_name not in permissions_by_module:
+                    permissions_by_module[module_name] = []
+                permissions_by_module[module_name].append(perm)
+        
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "permissions": permissions,
+            "grouped_permissions": permissions_by_module,
+            "total_permissions": len(permissions)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching user permissions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/users/{user_id}/permissions/check")
+async def check_user_permission(
+    user_id: str,
+    permission_request: Dict[str, Any],
+    authorization: Optional[str] = Header(None)
+):
+    """Check if a user has a specific permission."""
+    try:
+        permission_code = permission_request.get("permission_code")
+        if not permission_code:
+            raise HTTPException(status_code=400, detail="permission_code is required")
+        
+        # Use the PostgreSQL function to check permission
+        result = supabase.rpc("check_user_permission", {
+            "p_user_id": user_id,
+            "p_permission_code": permission_code
+        }).execute()
+        
+        if hasattr(result, 'error') and getattr(result, 'error', None):
+            raise HTTPException(status_code=400, detail=str(getattr(result, 'error')))
+        
+        has_permission = False
+        if result.data and isinstance(result.data, list) and len(result.data) > 0:
+            first_result = result.data[0]
+            if isinstance(first_result, dict):
+                has_permission = bool(first_result.get("check_user_permission", False))
+        
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "permission_code": permission_code,
+            "has_permission": has_permission
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking user permission: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===========================
+# PERMISSIONS DASHBOARD
+# ===========================
+
+@app.get("/api/permissions/dashboard")
+@require_any_permission(["permissions.read", "roles.read"])
+async def get_permissions_dashboard(current_user: dict = Depends(verify_supabase_token)):
+    """Get comprehensive permissions dashboard data - requires permissions.read or roles.read."""
+    try:
+        
+        # Get permission statistics
+        total_permissions = supabase.table("permissions").select("id").eq("is_active", True).execute()
+        total_roles = supabase.table("roles").select("id").execute()
+        
+        # Get permissions by module
+        module_stats = supabase.table("permissions").select("module").eq("is_active", True).execute()
+        
+        # Get role permission counts - fetch all role permissions and process in Python
+        role_permissions_data = supabase.table("role_permissions").select("""
+            role_id,
+            roles!inner(role_name)
+        """).eq("is_active", True).execute()
+        
+        # Count permissions per role using Python
+        role_permission_counts = {}
+        if role_permissions_data.data and isinstance(role_permissions_data.data, list):
+            for rp in role_permissions_data.data:
+                if isinstance(rp, dict) and 'roles' in rp and isinstance(rp['roles'], dict):
+                    role_name = rp['roles'].get('role_name')
+                    if role_name:
+                        role_permission_counts[role_name] = role_permission_counts.get(role_name, 0) + 1
+        
+        # Convert to list format for compatibility
+        role_permission_counts_list = [
+            {"role_name": role_name, "count": count} 
+            for role_name, count in role_permission_counts.items()
+        ]
+        
+        # Get recent permission assignments
+        recent_assignments = supabase.table("role_permissions").select("""
+            *,
+            roles!inner(role_name),
+            permissions!inner(permission_name, permission_code)
+        """).order("granted_at", desc=True).limit(10).execute()
+        
+        return {
+            "status": "success",
+            "statistics": {
+                "total_permissions": len(total_permissions.data) if total_permissions.data else 0,
+                "total_roles": len(total_roles.data) if total_roles.data else 0,
+                "permissions_by_module": module_stats.data if module_stats.data else [],
+                "role_permission_counts": role_permission_counts_list
+            },
+            "recent_assignments": recent_assignments.data if recent_assignments.data else []
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching permissions dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===========================
+# RBAC PROTECTED ENDPOINTS
+# ===========================
+
+# Example of permission-protected endpoints
+@app.get("/api/admin/users")
+@require_permission("users.read")
+async def get_admin_users(current_user: dict = Depends(verify_supabase_token)):
+    """Admin endpoint to get all users - requires users.read permission."""
+    try:
+        resp = supabase.table("users").select("*, roles(role_name)").execute()
+        return {"status": "success", "data": resp.data or []}
+    except Exception as e:
+        logger.error(f"Error fetching admin users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/users")
+@require_permission("users.create")
+async def create_admin_user(user_data: dict, current_user: dict = Depends(verify_supabase_token)):
+    """Admin endpoint to create a new user - requires users.create permission."""
+    try:
+        # Implementation for creating a user
+        return {"status": "success", "message": "User created successfully"}
+    except Exception as e:
+        logger.error(f"Error creating admin user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/admin/users/{user_id}")
+@require_permission("users.update")
+async def update_admin_user(user_id: str, user_data: dict, current_user: dict = Depends(verify_supabase_token)):
+    """Admin endpoint to update a user - requires users.update permission."""
+    try:
+        # Implementation for updating a user
+        return {"status": "success", "message": "User updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating admin user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/admin/users/{user_id}")
+@require_permission("users.delete")
+async def delete_admin_user(user_id: str, current_user: dict = Depends(verify_supabase_token)):
+    """Admin endpoint to delete a user - requires users.delete permission."""
+    try:
+        # Implementation for deleting a user
+        return {"status": "success", "message": "User deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting admin user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Example of role-protected endpoint
+@app.get("/api/reports/sensitive")
+@require_role("Admin")
+async def get_sensitive_reports(current_user: dict = Depends(verify_supabase_token)):
+    """Endpoint for sensitive reports - only accessible to Admin role."""
+    try:
+        # Implementation for sensitive reports
+        return {"status": "success", "data": "sensitive_report_data"}
+    except Exception as e:
+        logger.error(f"Error fetching sensitive reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Example of multiple permission requirement
+@app.get("/api/bugs/export")
+@require_all_permissions(["bugs.read", "reports.export"])
+async def export_bugs(current_user: dict = Depends(verify_supabase_token)):
+    """Export bugs data - requires both bugs.read and reports.export permissions."""
+    try:
+        resp = supabase.table("bugs").select("*").execute()
+        return {"status": "success", "data": resp.data or []}
+    except Exception as e:
+        logger.error(f"Error exporting bugs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Example of any permission requirement
+@app.get("/api/qa/dashboard")
+@require_any_permission(["qa.read", "admin.read"])
+async def get_qa_dashboard(current_user: dict = Depends(verify_supabase_token)):
+    """QA dashboard - accessible to users with either qa.read OR admin.read permission."""
+    try:
+        # Implementation for QA dashboard
+        return {"status": "success", "data": "qa_dashboard_data"}
+    except Exception as e:
+        logger.error(f"Error fetching QA dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Example of any role requirement
+@app.get("/api/dev/tools")
+@require_any_role(["Admin", "Developer"])
+async def get_dev_tools(request: Request, current_user: dict = Depends(verify_supabase_token)):
+    """Developer tools - accessible to Admin or DEV roles."""
+    try:
+        # Implementation for developer tools
+        return {"status": "success", "data": "dev_tools_data"}
+    except Exception as e:
+        logger.error(f"Error fetching dev tools: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
+    uvicorn.run(app, host="0.0.0.0", port=8001)

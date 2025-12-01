@@ -1,6 +1,6 @@
 // src/pages/Transtracker.jsx
 import React, { useEffect, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+// import { useNavigate } from "react-router-dom"; // not used now
 import { supabase } from "../supabaseClient";
 
 /**
@@ -9,7 +9,7 @@ import { supabase } from "../supabaseClient";
  */
 
 export default function Transtracker() {
-  const navigate = useNavigate();
+  // const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -170,7 +170,10 @@ export default function Transtracker() {
     if (f.type === "textarea") {
       return (
         <label key={f.name} className="block col-span-1 md:col-span-2">
-          <div className="text-sm font-medium">{f.label}{f.required ? " *" : ""}</div>
+          <div className="text-sm font-medium">
+            {f.label}
+            {f.required ? " *" : ""}
+          </div>
           <textarea rows={2} {...common} />
         </label>
       );
@@ -179,7 +182,10 @@ export default function Transtracker() {
     if (f.type === "date") {
       return (
         <label key={f.name} className="block">
-          <div className="text-sm font-medium">{f.label}{f.required ? " *" : ""}</div>
+          <div className="text-sm font-medium">
+            {f.label}
+            {f.required ? " *" : ""}
+          </div>
           <input {...common} type="date" max={f.max ?? todayStr} />
         </label>
       );
@@ -187,7 +193,10 @@ export default function Transtracker() {
 
     return (
       <label key={f.name} className="block">
-        <div className="text-sm font-medium">{f.label}{f.required ? " *" : ""}</div>
+        <div className="text-sm font-medium">
+          {f.label}
+          {f.required ? " *" : ""}
+        </div>
         <input
           {...common}
           type={f.type === "number" ? "number" : "text"}
@@ -202,7 +211,10 @@ export default function Transtracker() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from("transtrackers").select("*").order("buildreceiveddate", { ascending: true });
+      const { data, error } = await supabase
+        .from("transtrackers")
+        .select("*")
+        .order("buildreceiveddate", { ascending: true });
       if (error) {
         console.error("Fetch error:", error);
         setStatusMsg(`❌ Fetch error: ${error.message}`);
@@ -253,12 +265,21 @@ export default function Transtracker() {
     e.stopPropagation();
     const btn = e.currentTarget;
     const rect = btn.getBoundingClientRect();
-    const menuWidth = 160, menuHeight = 120, padding = 8;
-    let top = rect.bottom + 6, left = rect.right - menuWidth;
+    const menuWidth = 160,
+      menuHeight = 120,
+      padding = 8;
+    let top = rect.bottom + 6,
+      left = rect.right - menuWidth;
     if (left < padding) left = padding;
     if (left + menuWidth > window.innerWidth - padding) left = window.innerWidth - menuWidth - padding;
     if (top + menuHeight > window.innerHeight - padding) top = Math.max(padding, rect.top - menuHeight - 6);
-    if (openMenuId === uid) { setOpenMenuId(null); setMenuPosition(null); } else { setOpenMenuId(uid); setMenuPosition({ left, top }); }
+    if (openMenuId === uid) {
+      setOpenMenuId(null);
+      setMenuPosition(null);
+    } else {
+      setOpenMenuId(uid);
+      setMenuPosition({ left, top });
+    }
   };
 
   const renderCell = (val) => {
@@ -295,17 +316,26 @@ export default function Transtracker() {
 
   const htmlTagRegex = /<[^>]+>/i;
   const validateNoNegativeOrHtml = (frm) => {
-    const negatives = [], htmlFields = [];
+    const negatives = [];
+    const htmlFields = [];
+
     for (const k of numericFields) {
       const v = frm[k];
       if (v === "" || v === null || v === undefined) continue;
       const n = Number(v);
-      if (!Number.isNaN(n) && n < 0) negatives.push(k);
+      // ✅ fixed: use Number.isNaN
+      if (!Number.isNaN(n) && n < 0) {
+        negatives.push(k);
+      }
     }
+
     for (const [k, v] of Object.entries(frm)) {
       if (v === "" || v === null || v === undefined) continue;
-      if (typeof v === "string" && htmlTagRegex.test(v)) htmlFields.push(k);
+      if (typeof v === "string" && htmlTagRegex.test(v)) {
+        htmlFields.push(k);
+      }
     }
+
     return { negatives, htmlFields };
   };
 
@@ -319,7 +349,9 @@ export default function Transtracker() {
       if (negatives.length) parts.push("negative numbers in: " + negatives.join(", "));
       if (htmlFields.length) parts.push("HTML tags detected in: " + htmlFields.join(", "));
       const msg = `Invalid input detected — please remove ${parts.join(" and ")} before saving.`;
-      setValidationMessage(msg); setShowValidationPrompt(true); setStatusMsg(`❌ ${msg}`);
+      setValidationMessage(msg);
+      setShowValidationPrompt(true);
+      setStatusMsg(`❌ ${msg}`);
       return;
     }
 
@@ -336,7 +368,9 @@ export default function Transtracker() {
       const prettyMap = { buildreceiveddate: "Build Received Date", testreportsentdate: "Test Report Sent Date" };
       const pretty = future.map((f) => prettyMap[f] || f);
       const msg = `Date cannot be in the future: ${pretty.join(", ")}`;
-      setValidationMessage(msg); setShowValidationPrompt(true); setStatusMsg(`❌ ${msg}`);
+      setValidationMessage(msg);
+      setShowValidationPrompt(true);
+      setStatusMsg(`❌ ${msg}`);
       return;
     }
 
@@ -364,29 +398,48 @@ export default function Transtracker() {
 
     const vr = validateRequired(payload);
     if (!vr.ok) {
-      const friendly = {
-        applicationtype: "Application Type",
-        productowner: "Product Owner",
-        spoc: "SPOC",
-        buildreceiveddate: "Build Received Date",
-        signoffstatus: "Sign Off Status",
-        totalopenbugs: "Total Open Bugs",
-      }[vr.field] || vr.field;
+      const friendly =
+        {
+          applicationtype: "Application Type",
+          productowner: "Product Owner",
+          spoc: "SPOC",
+          buildreceiveddate: "Build Received Date",
+          signoffstatus: "Sign Off Status",
+          totalopenbugs: "Total Open Bugs",
+        }[vr.field] || vr.field;
       setStatusMsg(`❌ ${friendly} is required`);
-      try { const el = document.querySelector(`[name="${vr.field}"]`); if (el && el.focus) el.focus(); } catch { }
+      try {
+        const el = document.querySelector(`[name="${vr.field}"]`);
+        if (el && el.focus) el.focus();
+      } catch {
+        // ignore
+      }
       return;
     }
 
     try {
       if (editRowId) {
         const { data, error } = await supabase.from("transtrackers").update(payload).eq("id", editRowId).select();
-        if (error) { setStatusMsg(`❌ Update failed: ${error.message}`); console.error(error); }
-        else { setStatusMsg("✅ Updated successfully"); setShowAddForm(false); setEditRowId(null); await fetchData(); }
+        if (error) {
+          setStatusMsg(`❌ Update failed: ${error.message}`);
+          console.error(error);
+        } else {
+          setStatusMsg("✅ Updated successfully");
+          setShowAddForm(false);
+          setEditRowId(null);
+          await fetchData();
+        }
       } else {
         // INSERT: do NOT send id; DB will generate it
         const { data, error } = await supabase.from("transtrackers").insert([payload]).select();
-        if (error) { setStatusMsg(`❌ Insert failed: ${error.message}`); console.error(error); }
-        else { setStatusMsg("✅ Inserted successfully"); setShowAddForm(false); await fetchData(); }
+        if (error) {
+          setStatusMsg(`❌ Insert failed: ${error.message}`);
+          console.error(error);
+        } else {
+          setStatusMsg("✅ Inserted successfully");
+          setShowAddForm(false);
+          await fetchData();
+        }
       }
     } catch (err) {
       console.error(err);
@@ -394,16 +447,32 @@ export default function Transtracker() {
     }
   };
 
-  const initiateDelete = (row) => { setAppToDelete(row); setShowDeleteConfirm(true); setOpenMenuId(null); setMenuPosition(null); };
+  const initiateDelete = (row) => {
+    setAppToDelete(row);
+    setShowDeleteConfirm(true);
+    setOpenMenuId(null);
+    setMenuPosition(null);
+  };
   const confirmDelete = async () => {
-    if (!appToDelete) { setShowDeleteConfirm(false); return; }
+    if (!appToDelete) {
+      setShowDeleteConfirm(false);
+      return;
+    }
     setStatusMsg("Deleting...");
     try {
       const { error } = await supabase.from("transtrackers").delete().eq("id", appToDelete.id);
       if (error) setStatusMsg(`❌ Delete failed: ${error.message}`);
-      else { setStatusMsg("✅ Deleted"); await fetchData(); }
-    } catch (err) { console.error(err); setStatusMsg("❌ Delete failed"); }
-    finally { setShowDeleteConfirm(false); setAppToDelete(null); }
+      else {
+        setStatusMsg("✅ Deleted");
+        await fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg("❌ Delete failed");
+    } finally {
+      setShowDeleteConfirm(false);
+      setAppToDelete(null);
+    }
   };
 
   const openEdit = (row) => {
@@ -417,7 +486,13 @@ export default function Transtracker() {
     setOpenMenuId(null);
     setMenuPosition(null);
   };
-  const openViewModal = (row) => { setViewRow(row); setShowView(true); setSelectedSet(new Set()); setOpenMenuId(null); setMenuPosition(null); };
+  const openViewModal = (row) => {
+    setViewRow(row);
+    setShowView(true);
+    setSelectedSet(new Set());
+    setOpenMenuId(null);
+    setMenuPosition(null);
+  };
 
   // small UI components (ViewModal / ConfirmModal)
   const ViewModal = ({ row, onClose }) => (
@@ -426,7 +501,9 @@ export default function Transtracker() {
       <div className="bg-white rounded p-4 shadow-lg w-full max-w-3xl z-50 overflow-auto max-h-[80vh]">
         <div className="flex justify-between items-center mb-3">
           <h3 className="text-lg font-semibold text-indigo-700">View Record</h3>
-          <button onClick={onClose} className="text-xl text-red-500">✕</button>
+          <button onClick={onClose} className="text-xl text-red-500">
+            ✕
+          </button>
         </div>
 
         {/* Render fields in same order/style as add form, hide id/__uid */}
@@ -434,7 +511,10 @@ export default function Transtracker() {
           {FORM_FIELDS.map((f) => (
             <div key={f.name} className="flex flex-col">
               {/* label on top — matches add/edit label style */}
-              <div className="text-sm font-medium text-gray-700 mb-1">{f.label}{f.required ? " *" : ""}</div>
+              <div className="text-sm font-medium text-gray-700 mb-1">
+                {f.label}
+                {f.required ? " *" : ""}
+              </div>
 
               {/* value rendered in an input-like box so label/value are visually distinct */}
               <div className="w-full border rounded p-2 bg-gray-50 text-gray-900">
@@ -452,12 +532,18 @@ export default function Transtracker() {
       <div className="bg-white rounded-xl shadow-2xl p-6 w-96">
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-lg font-semibold text-red-600">{title}</h2>
-          <button onClick={onCancel} className="text-gray-500 hover:text-gray-800 text-xl">×</button>
+          <button onClick={onCancel} className="text-gray-500 hover:text-gray-800 text-xl">
+            ×
+          </button>
         </div>
         <div className="text-gray-700 mb-6">{children}</div>
         <div className="flex justify-end space-x-3">
-          <button onClick={onCancel} className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Delete</button>
+          <button onClick={onCancel} className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+            Delete
+          </button>
         </div>
       </div>
     </div>
@@ -470,25 +556,27 @@ export default function Transtracker() {
           <div>
             <h1 className="text-xl font-semibold">Transtracker</h1>
             {!showAddForm && !showView && (
-              <div className="text-sm text-gray-600">Selected: <span className="font-medium">{selectedSet.size}</span></div>
+              <div className="text-sm text-gray-600">
+                Selected: <span className="font-medium">{selectedSet.size}</span>
+              </div>
             )}
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={handleAddClick} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">+ Add</button>
+            <button
+              onClick={handleAddClick}
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+            >
+              + Add
+            </button>
             {!showAddForm && (
-              <button onClick={toggleSelectAll} className="bg-blue-100 border px-3 py-2 rounded hover:bg-blue-200 text-sm">
+              <button
+                onClick={toggleSelectAll}
+                className="bg-blue-100 border px-3 py-2 rounded hover:bg-blue-200 text-sm"
+              >
                 {rows.length > 0 && selectedSet.size === rows.length ? "Unselect All" : "Select All"}
               </button>
             )}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate("/transtracker/upload")}
-                className="px-3 py-2 border rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-sm font-medium"
-              >
-                Go to Uploads
-              </button>
-            </div>
           </div>
         </div>
 
@@ -517,25 +605,42 @@ export default function Transtracker() {
                   </thead>
                   <tbody>
                     {rows.length === 0 ? (
-                      <tr><td colSpan={10} className="px-3 py-6 text-center text-gray-600">No records found</td></tr>
-                    ) : rows.map((r) => (
-                      <tr key={r.__uid} className="border-b border-neutral-200 hover:bg-neutral-50">
-                        <td className="px-3 py-2">
-                          <input type="checkbox" checked={selectedSet.has(r.__uid)} onChange={() => toggleSelect(r.__uid)} aria-label="Select row" />
-                        </td>
-                        <td className="px-3 py-2">{renderCell(r.applicationtype)}</td>
-                        <td className="px-3 py-2">{renderCell(r.productsegregated)}</td>
-                        <td className="px-3 py-2">{renderCell(r.productowner)}</td>
-                        <td className="px-3 py-2">{renderCell(r.spoc)}</td>
-                        <td className="px-3 py-2">{renderCell(r.buildreceiveddate)}</td>
-                        <td className="px-3 py-2">{renderCell(r.testreportsentdate)}</td>
-                        <td className="px-3 py-2">{renderCell(r.signoffstatus)}</td>
-                        <td className="px-3 py-2">{renderCell(r.totalopenbugs)}</td>
-                        <td className="px-3 py-2 relative">
-                          <button type="button" onClick={(e) => toggleMenu(e, r.__uid)} className="px-2 py-1 border rounded">☰</button>
+                      <tr>
+                        <td colSpan={10} className="px-3 py-6 text-center text-gray-600">
+                          No records found
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      rows.map((r) => (
+                        <tr key={r.__uid} className="border-b border-neutral-200 hover:bg-neutral-50">
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedSet.has(r.__uid)}
+                              onChange={() => toggleSelect(r.__uid)}
+                              aria-label="Select row"
+                            />
+                          </td>
+                          <td className="px-3 py-2">{renderCell(r.applicationtype)}</td>
+                          <td className="px-3 py-2">{renderCell(r.productsegregated)}</td>
+                          <td className="px-3 py-2">{renderCell(r.productowner)}</td>
+                          <td className="px-3 py-2">{renderCell(r.spoc)}</td>
+                          <td className="px-3 py-2">{renderCell(r.buildreceiveddate)}</td>
+                          <td className="px-3 py-2">{renderCell(r.testreportsentdate)}</td>
+                          <td className="px-3 py-2">{renderCell(r.signoffstatus)}</td>
+                          <td className="px-3 py-2">{renderCell(r.totalopenbugs)}</td>
+                          <td className="px-3 py-2 relative">
+                            <button
+                              type="button"
+                              onClick={(e) => toggleMenu(e, r.__uid)}
+                              className="px-2 py-1 border rounded"
+                            >
+                              ☰
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -544,15 +649,40 @@ export default function Transtracker() {
             {showAddForm && (
               <div className="mt-6 bg-white p-4 rounded shadow">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-semibold">{editRowId ? "Edit Record" : "Create New Record"}</h2>
-                  <button onClick={() => { setShowAddForm(false); setEditRowId(null); setForm({ ...initialForm }); setStatusMsg(""); }} className="text-xl text-red-500 font-bold">✕</button>
+                  <h2 className="text-lg font-semibold">
+                    {editRowId ? "Edit Record" : "Create New Record"}
+                  </h2>
+                  <button
+                    onClick={() => {
+                      setShowAddForm(false);
+                      setEditRowId(null);
+                      setForm({ ...initialForm });
+                      setStatusMsg("");
+                    }}
+                    className="text-xl text-red-500 font-bold"
+                  >
+                    ✕
+                  </button>
                 </div>
 
                 <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {FORM_FIELDS.map(renderFormField)}
                   <div className="col-span-1 md:col-span-2 flex justify-end gap-2 mt-3">
-                    <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
-                    <button type="button" onClick={() => { setShowAddForm(false); setEditRowId(null); setForm({ ...initialForm }); setStatusMsg(""); }} className="bg-gray-100 px-4 py-2 rounded">Cancel</button>
+                    <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddForm(false);
+                        setEditRowId(null);
+                        setForm({ ...initialForm });
+                        setStatusMsg("");
+                      }}
+                      className="bg-gray-100 px-4 py-2 rounded"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </form>
               </div>
@@ -561,16 +691,43 @@ export default function Transtracker() {
             {showView && viewRow && <ViewModal row={viewRow} onClose={() => setShowView(false)} />}
 
             {openMenuId && menuPosition && (
-              <div ref={menuRef} style={{ position: "fixed", left: `${menuPosition.left}px`, top: `${menuPosition.top}px`, width: 160, zIndex: 99999 }}>
-                <div className="bg-white border rounded shadow overflow-auto" style={{ maxHeight: 220 }}>
+              <div
+                ref={menuRef}
+                style={{
+                  position: "fixed",
+                  left: `${menuPosition.left}px`,
+                  top: `${menuPosition.top}px`,
+                  width: 160,
+                  zIndex: 99999,
+                }}
+              >
+                <div
+                  className="bg-white border rounded shadow overflow-auto"
+                  style={{ maxHeight: 220 }}
+                >
                   {(() => {
                     const row = rows.find((rr) => rr.__uid === openMenuId);
                     if (!row) return null;
                     return (
                       <>
-                        <button className="w-full text-left px-3 py-2 hover:bg-gray-100" onClick={() => openViewModal(row)}>View</button>
-                        <button className="w-full text-left px-3 py-2 hover:bg-gray-100" onClick={() => openEdit(row)}>Edit</button>
-                        <button className="w-full text-left px-3 py-2 hover:bg-gray-100 text-red-600" onClick={() => initiateDelete(row)}>Delete</button>
+                        <button
+                          className="w-full text-left px-3 py-2 hover:bg-gray-100"
+                          onClick={() => openViewModal(row)}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="w-full text-left px-3 py-2 hover:bg-gray-100"
+                          onClick={() => openEdit(row)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="w-full text-left px-3 py-2 hover:bg-gray-100 text-red-600"
+                          onClick={() => initiateDelete(row)}
+                        >
+                          Delete
+                        </button>
                       </>
                     );
                   })()}
@@ -581,10 +738,17 @@ export default function Transtracker() {
             {showDeleteConfirm && appToDelete && (
               <ConfirmModal
                 title="Confirm Delete"
-                onCancel={() => { setShowDeleteConfirm(false); setAppToDelete(null); }}
+                onCancel={() => {
+                  setShowDeleteConfirm(false);
+                  setAppToDelete(null);
+                }}
                 onConfirm={confirmDelete}
               >
-                Are you sure you want to delete the Record <span className="font-semibold text-indigo-700">{appToDelete.productsegregated || appToDelete.applicationtype}</span>?
+                Are you sure you want to delete the Record{" "}
+                <span className="font-semibold text-indigo-700">
+                  {appToDelete.productsegregated || appToDelete.applicationtype}
+                </span>
+                ?
               </ConfirmModal>
             )}
 
@@ -593,11 +757,27 @@ export default function Transtracker() {
                 <div className="bg-white rounded-lg shadow-lg p-5 w-full max-w-md">
                   <div className="flex items-start justify-between">
                     <h3 className="text-lg font-semibold">Invalid Input</h3>
-                    <button onClick={() => { setShowValidationPrompt(false); setValidationMessage(""); }} className="text-gray-400 hover:text-gray-700">×</button>
+                    <button
+                      onClick={() => {
+                        setShowValidationPrompt(false);
+                        setValidationMessage("");
+                      }}
+                      className="text-gray-400 hover:text-gray-700"
+                    >
+                      ×
+                    </button>
                   </div>
                   <div className="mt-3 text-sm text-gray-700">{validationMessage}</div>
                   <div className="mt-4 flex justify-end">
-                    <button onClick={() => { setShowValidationPrompt(false); setValidationMessage(""); }} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">OK</button>
+                    <button
+                      onClick={() => {
+                        setShowValidationPrompt(false);
+                        setValidationMessage("");
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      OK
+                    </button>
                   </div>
                 </div>
               </div>

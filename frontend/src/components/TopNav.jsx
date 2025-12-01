@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   LogOut,
   ChevronRight,
+  Key,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -42,6 +43,7 @@ export default function TopNav({ open, onClose }) {
     { to: "/tasks", icon: ListTodo, label: "Tasks" },
     { to: "/transtracker", icon: ListTodo, label: "Transtracker" },
     { to: "/users", icon: Users, label: "Users" },
+    { to: "/permissions", icon: Key, label: "Permissions" },
     { to: "/settings", icon: Settings, label: "Settings" },
   ];
 

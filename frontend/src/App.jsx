@@ -6,6 +6,7 @@ import TasksList from "./pages/TasksList";
 import TaskDetails from "./pages/TaskDetails";
 import TaskForm from "./pages/TaskForm";
 import UsersPage from "./pages/UsersPage";
+import PermissionsPage from "./pages/PermissionsPage";
 import Settings from "./pages/Settings";
 import MainLayout from "./layouts/MainLayout";
 import Transtracker from './pages/Transtracker';
@@ -83,6 +84,18 @@ function App() {
           <ProtectedRoute>
             <MainLayout>
               <UsersPage />
+            </MainLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* -------------------- PERMISSIONS -------------------- */}
+      <Route
+        path="/permissions"
+        element={
+          <ProtectedRoute>
+            <MainLayout>
+              <PermissionsPage />
             </MainLayout>
           </ProtectedRoute>
         }

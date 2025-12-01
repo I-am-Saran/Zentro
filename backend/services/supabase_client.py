@@ -8,11 +8,19 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise Exception("Missing SUPABASE_URL or SUPABASE_KEY environment variables. Check your .env file.")
 
+# Regular client for normal operations
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Admin client for admin operations (invitations, user management)
+supabase_admin: Optional[Client] = None
+if SUPABASE_SERVICE_ROLE_KEY:
+    # Create admin client with service role key
+    supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 def verify_supabase_token(authorization_header: Optional[str] = None):

@@ -29,3 +29,11 @@ export async function get(path) {
 export async function post(path, data) {
   return request(path, { method: "POST", body: JSON.stringify(data) });
 }
+
+export async function put(path, data) {
+  return request(path, { method: "PUT", body: JSON.stringify(data) });
+}
+
+export async function del(path) {
+  return request(path, { method: "DELETE" });
+}
