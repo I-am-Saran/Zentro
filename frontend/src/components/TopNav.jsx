@@ -8,6 +8,7 @@ import {
   LogOut,
   ChevronRight,
   LayoutDashboard,
+  Key,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -62,7 +63,7 @@ export default function TopNav({ open, onClose }) {
               <span className="text-lg font-bold text-white">⚗️</span>
             </div>
             <Typography variant="h6" className="font-bold text-white">
-              Alchemy
+              Nexus
             </Typography>
           </Link>
           <button
@@ -129,7 +130,7 @@ export default function TopNav({ open, onClose }) {
           <span>Logout</span>
         </button>
         <Typography className="text-xs text-white/50 mt-3 text-center">
-          v1.0 • Alchemy GRC
+          v1.0 • Nexus
         </Typography>
       </div>
     </aside>

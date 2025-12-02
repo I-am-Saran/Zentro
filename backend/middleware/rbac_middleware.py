@@ -2,7 +2,7 @@
 import functools
 from typing import Optional, List, Union, Any
 from fastapi import HTTPException, Depends, Header, Request
-from services.supabase_client import supabase
+from backend.services.supabase_client import supabase
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def verify_supabase_token(authorization: Optional[str] = Header(None)) -> dict:
         logger.info(f"Token extracted: {token[:20]}...")
         
         # First, try to decode the token to get basic info
-        from services.auth_utils import decode_access_token
+        from backend.services.auth_utils import decode_access_token
         decoded_token = decode_access_token(token)
         
         if not decoded_token:

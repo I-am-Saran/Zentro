@@ -300,13 +300,13 @@ export default function Dashboard() {
       const sdt = start_date
         ? new Date(start_date + "T00:00:00")
         : ttStart
-        ? new Date(ttStart + "T00:00:00")
-        : null;
+          ? new Date(ttStart + "T00:00:00")
+          : null;
       const edt = end_date
         ? new Date(end_date + "T23:59:59")
         : ttEnd
-        ? new Date(ttEnd + "T23:59:59")
-        : null;
+          ? new Date(ttEnd + "T23:59:59")
+          : null;
 
       const filtered = rows.filter((r) => {
         const p = (r.productsegregated || "").toString().toLowerCase();
@@ -824,10 +824,10 @@ export default function Dashboard() {
     const m = new Map();
     for (const r of ttFilteredRows || []) {
       const name = (
-          r.applicationtype ??
-          r.application ??
-          "Unknown"
-        ).toString();
+        r.applicationtype ??
+        r.application ??
+        "Unknown"
+      ).toString();
       m.set(name, (m.get(name) || 0) + 1);
     }
     return Array.from(m.entries())
@@ -1018,7 +1018,7 @@ export default function Dashboard() {
           {/* Greeting */}
           <div className="mb-8 animate-fade-in">
             <h1 className="text-4xl font-black bg-gradient-to-r from-primary via-accent to-primaryLight bg-clip-text text-transparent">
-              👋 Welcome back to Alchemy
+              👋 Welcome back to Nexus
             </h1>
             <p className="mt-2 text-lg text-textMuted font-medium">
               Here is your dashboard overview. Stay on top of your projects and
@@ -1859,8 +1859,8 @@ export default function Dashboard() {
                                     ["Signed Off", "GO"].includes(entry.name)
                                       ? "#10B981"
                                       : entry.name === "No Go"
-                                      ? "#EF4444"
-                                      : "#FBBF24"
+                                        ? "#EF4444"
+                                        : "#FBBF24"
                                   }
                                 />
                               ))}
@@ -2055,25 +2055,23 @@ export default function Dashboard() {
                     <button
                       onClick={gotoPrevPage}
                       disabled={ttOffset === 0}
-                      className={`px-3 py-1 rounded-md text-sm border border-borderLight ${
-                        ttOffset === 0
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:bg-backgroundAlt"
-                      }`}
+                      className={`px-3 py-1 rounded-md text-sm border border-borderLight ${ttOffset === 0
+                        ? "opacity-50 cursor-not-allowed"
+                        : "hover:bg-backgroundAlt"
+                        }`}
                     >
                       {/* Prev */}
                     </button>
                     <div className="text-sm text-textMuted">
-                       {/* {currentPage} / {totPagealPages} */}
+                      {/* {currentPage} / {totPagealPages} */}
                     </div>
                     <button
                       onClick={gotoNextPage}
                       disabled={ttOffset + ttLimit >= totalRows}
-                      className={`px-3 py-1 rounded-md text-sm border border-borderLight ${
-                        ttOffset + ttLimit >= totalRows
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:bg-backgroundAlt"
-                      }`}
+                      className={`px-3 py-1 rounded-md text-sm border border-borderLight ${ttOffset + ttLimit >= totalRows
+                        ? "opacity-50 cursor-not-allowed"
+                        : "hover:bg-backgroundAlt"
+                        }`}
                     >
                       {/* Next */}
                     </button>

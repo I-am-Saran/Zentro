@@ -3,11 +3,13 @@ from fastapi import FastAPI, HTTPException, Request, Header, Query, File, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Union
-from services.supabase_client import supabase, supabase_admin, verify_supabase_token
-from services.formatters import normalize_control
+from backend.services.supabase_client import supabase, supabase_admin, verify_supabase_token
+from backend.services.formatters import normalize_control
 from datetime import datetime, timezone
 import re
 from supabase import create_client
+
+
 
 class Role(BaseModel):
     id: str
@@ -22,8 +24,8 @@ class Module(BaseModel):
     description: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-from services.auth_utils import verify_password, create_access_token, decode_access_token, get_password_hash
-from middleware.rbac_middleware import (
+from backend.services.auth_utils import verify_password, create_access_token, decode_access_token, get_password_hash
+from backend.middleware.rbac_middleware import (
     require_permission, 
     require_any_permission, 
     require_all_permissions,
@@ -229,9 +231,6 @@ async def login(request: Request):
     except Exception as e:
         print(f"Login error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
- 
 
 
 @app.get("/api/users/search")
@@ -684,25 +683,55 @@ async def create_user(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================
-# 🪲 BUGS MODULE ENDPOINTS (FINAL, STABLE, PRODUCTION-READY)
+# 🪲 BUGS MODULE ENDPOINTS (USING SUPABASE REST)
 # ============================
 import os
 import json
 import time
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List
-from fastapi import HTTPException, Request, Path, File, UploadFile
-import requests
 
+import requests
+from fastapi import HTTPException, Request, Path, File, UploadFile
+
+# Supabase config
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_KEY")
-# Supabase REST URL (PostgREST) - currently not used, but kept for reference
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or SUPABASE_ANON_KEY
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+  raise RuntimeError(
+      "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY must be set in environment"
+  )
+
+# Supabase REST URL (PostgREST)
 SUPABASE_REST_URL = f"{SUPABASE_URL}/rest/v1"
+
+# 🔹 Supabase Python client (used only for Storage)
+from supabase import create_client, Client
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
 # Candidate table names to try
 CANDIDATE_TABLES = ["bugs", "Bugs_file", "bugs_file"]
-# --- STARTUP CHECK ---
-if not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
-    pass
+
+
+def _supabase_headers(extra: Dict[str, str] | None = None) -> Dict[str, str]:
+    """
+    Base headers for Supabase REST.
+    """
+    base = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if extra:
+        base.update(extra)
+    return base
+
+
 # ---------- NORMALIZER ----------
 
 def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -755,11 +784,12 @@ def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
         # 🔹 Description: ONLY from DB "Description" column
         description = row.get("Description") or row.get("description") or ""
 
-        # 🔹 Comment: ONLY from DB "Comment" column
+        # 🔹 Comment: ONLY from DB "Comment" column (raw text / JSON string)
         comment_value = row.get("Comment") or row.get("comment") or ""
 
-        # 🔹 Comments array: parse Comment JSON if it's a JSON array,
-        # otherwise wrap the string into [{ text, user, timestamp }]
+        # 🔹 Comments array:
+        # DB design is still: "Comment" column => string / JSON string
+        # We expose normalized "Comments" array to the frontend.
         comments: List[Dict[str, Any]] = []
         if isinstance(comment_value, str) and comment_value.strip():
             try:
@@ -811,9 +841,9 @@ def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
             "Assignee": assignee,
             "Changed": changed,
             "Product": product,
-            "Description": description,   # ✅ now included
-            "Comment": comment_value,     # ✅ raw Comment field
-            "Comments": comments,
+            "Description": description,
+            "Comment": comment_value,  # raw DB column
+            "Comments": comments,      # normalized array
             "Attachments": attachments,
         }
 
@@ -832,29 +862,31 @@ def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
             "Comments": [],
             "Attachments": [],
         }
-# ---------- SELECT / INSERT HELPERS ----------
+
+
+# ---------- SELECT / INSERT HELPERS (REST) ----------
 
 def _select_bugs_with_fallback():
     errors = []
     empty_tables = []
     for name in CANDIDATE_TABLES:
         try:
-            # attempt to order by Changed if available
-            try:
-                resp = (
-                    supabase.table(name)
-                    .select("*", count="exact")
-                    .order("Changed", desc=True)
-                    .execute()
-                )
-            except Exception:
-                resp = supabase.table(name).select("*", count="exact").execute()
+            params = {
+                "select": "*",
+                "order": "Changed.desc",
+            }
+            resp = requests.get(
+                f"{SUPABASE_REST_URL}/{name}",
+                headers=_supabase_headers(),
+                params=params,
+                timeout=10,
+            )
 
-            if getattr(resp, "error", None):
-                errors.append(f"{name}: {resp.error}")
+            if not resp.ok:
+                errors.append(f"{name}: {resp.status_code} {resp.text}")
                 continue
 
-            data = resp.data or []
+            data = resp.json() or []
             if not data:
                 empty_tables.append(name)
                 continue
@@ -866,7 +898,7 @@ def _select_bugs_with_fallback():
             continue
 
     if empty_tables:
-        return {"status": 'success', "data": []}
+        return {"status": "success", "data": []}
 
     raise HTTPException(
         status_code=500,
@@ -878,18 +910,19 @@ def _insert_bug_with_fallback(payload: Dict[str, Any]):
     errors = []
     for name in CANDIDATE_TABLES:
         try:
-            resp = (
-                supabase.table(name)
-                .insert(payload, returning="representation")
-                .execute()
+            headers = _supabase_headers({"Prefer": "return=representation"})
+            resp = requests.post(
+                f"{SUPABASE_REST_URL}/{name}",
+                headers=headers,
+                json=payload,
+                timeout=10,
             )
-            if getattr(resp, "error", None):
-                errors.append(f"{name}: {resp.error}")
+            if not resp.ok:
+                errors.append(f"{name}: {resp.status_code} {resp.text}")
                 continue
 
-            inserted = resp.data or []
+            inserted = resp.json() or []
             normalized = [normalize_bug_row(r) for r in inserted]
-            # We can return normalized so frontend always gets same shape
             return {"status": "success", "data": normalized}
 
         except Exception as e:
@@ -926,10 +959,6 @@ async def create_bug(request: Request):
             payload["Comment"] = json.dumps(payload["Comments"])
             payload.pop("Comments", None)
 
-        # ✅ DO NOT remove Attachments: frontend may send list and we want it in JSONB column
-        # if "Attachments" not in payload:
-        #     payload["Attachments"] = []   # optional default
-
         # 3. Default values (do NOT override Description or Comment if provided)
         defaults = {
             "Defect type": "Functional",
@@ -949,7 +978,6 @@ async def create_bug(request: Request):
             "automation status": "Pending",
             "Device type": "Web",
             "Browser tested": "",
-            # DON'T set "Comments" here (no such column), and don't override Description/Comment
         }
         for k, v in defaults.items():
             if payload.get(k) is None or payload.get(k) == "":
@@ -992,15 +1020,11 @@ async def get_priority_stats():
     Returns count of bugs by priority: { high, medium, low }
     """
     try:
-        # We can reuse _select_bugs_with_fallback or just query directly.
-        # For efficiency, let's query directly if possible, but _select_bugs_with_fallback handles table names.
-        # Let's use _select_bugs_with_fallback for consistency.
-        
         result = _select_bugs_with_fallback()
         bugs = result.get("data", [])
-        
+
         counts = {"high": 0, "medium": 0, "low": 0}
-        
+
         for b in bugs:
             p = str(b.get("Priority", "")).lower()
             if p in ["critical", "high", "p0", "p1"]:
@@ -1008,9 +1032,8 @@ async def get_priority_stats():
             elif p in ["medium", "med", "p2"]:
                 counts["medium"] += 1
             else:
-                # Low, Minor, or anything else
                 counts["low"] += 1
-                
+
         return {"status": "success", "data": counts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1018,106 +1041,50 @@ async def get_priority_stats():
 
 # ---------- GET BUG DETAILS ----------
 
-# ---------- GET BUG DETAILS ----------
-
 @app.get("/api/bugs/{bug_id}")
 async def get_bug_details(bug_id: str = Path(...)):
     try:
-        # 1. Fetch Bug Row from any candidate table
         bug_data = None
-        table_used = None
 
         for name in CANDIDATE_TABLES:
             try:
-                resp = (
-                    supabase.table(name)
-                    .select("*")
-                    .eq("Bug ID", bug_id)
-                    .execute()
+                params = {
+                    "select": "*",
+                    "Bug ID": f"eq.{bug_id}",
+                }
+                resp = requests.get(
+                    f"{SUPABASE_REST_URL}/{name}",
+                    headers=_supabase_headers(),
+                    params=params,
+                    timeout=10,
                 )
-                if not resp.data and bug_id.isdigit():
-                    resp = (
-                        supabase.table(name)
-                        .select("*")
-                        .eq("Bug ID", int(bug_id))
-                        .execute()
-                    )
 
-                if resp.data:
-                    bug_data = resp.data[0]
-                    table_used = name
+                if resp.ok and resp.json():
+                    bug_data = resp.json()[0]
                     break
-            except Exception as e:
+
+                # if bug_id is numeric, try int
+                if bug_id.isdigit():
+                    params = {
+                        "select": "*",
+                        "Bug ID": f"eq.{int(bug_id)}",
+                    }
+                    resp = requests.get(
+                        f"{SUPABASE_REST_URL}/{name}",
+                        headers=_supabase_headers(),
+                        params=params,
+                        timeout=10,
+                    )
+                    if resp.ok and resp.json():
+                        bug_data = resp.json()[0]
+                        break
+            except Exception:
                 continue
 
         if not bug_data:
             raise HTTPException(status_code=404, detail="Bug not found")
 
-        # 2. Normalize DB row → frontend format
         normalized = normalize_bug_row(bug_data)
-
-        # 3. If Attachments is empty, look in Supabase Storage using bug_id prefix
-        if not normalized.get("Attachments"):
-            bucket = "bug-attachments"
-            folder = "bug-attachments"  # this is the "directory" we used in upload
-
-            # Use admin client if possible (bypass RLS)
-            service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-            storage_client = supabase
-            if service_key:
-                try:
-                    from supabase import create_client
-                    storage_client = create_client(SUPABASE_URL, service_key)
-                except Exception as e:
-                    pass
-
-            try:
-                # list files under folder, filter by name starting with "BUG-XXX_"
-                list_resp = storage_client.storage.from_(bucket).list(
-                    folder,
-                    {"search": f"{bug_id}_"},
-                )
-
-                attachments_from_storage: List[Dict[str, Any]] = []
-
-                if list_resp:
-                    for obj in list_resp:
-                        name = obj.get("name")
-                        if not name:
-                            continue
-
-                        # we only care about files that start with bug_id_
-                        if not name.startswith(f"{bug_id}_"):
-                            continue
-
-                        path = f"{folder}/{name}"
-
-                        public = storage_client.storage.from_(bucket).get_public_url(path)
-                        if isinstance(public, dict):
-                            url = (
-                                public.get("publicURL")
-                                or public.get("public_url")
-                                or public.get("signedURL")
-                            )
-                        else:
-                            url = (
-                                getattr(public, "public_url", None)
-                                or getattr(public, "url", None)
-                            )
-
-                        attachments_from_storage.append(
-                            {
-                                "filename": name,
-                                "url": url,
-                                "path": path,
-                            }
-                        )
-
-                if attachments_from_storage:
-                    normalized["Attachments"] = attachments_from_storage
-
-            except Exception as e:
-                pass
 
         return {"status": "success", "data": normalized}
 
@@ -1127,6 +1094,8 @@ async def get_bug_details(bug_id: str = Path(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------- UPLOAD ATTACHMENTS ----------
+
 @app.post("/api/bugs/{bug_id}/attachments")
 async def upload_bug_attachments(
     bug_id: str,
@@ -1135,67 +1104,49 @@ async def upload_bug_attachments(
     bucket = "bug-attachments"
     uploaded: List[Dict[str, Any]] = []
 
-
-
-    # 🔹 BYPASS RLS: Try to use Service Role Key locally if available
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    # use global supabase client; if service key exists, it already uses it
     storage_client = supabase
 
-    if service_key:
-        try:
-            storage_client = create_client(SUPABASE_URL, service_key)
-        except Exception as e:
-            pass
-    else:
-        pass
-
-    # Check if bucket exists
+    # optional: check if bucket exists
     try:
         buckets = storage_client.storage.list_buckets()
-        bucket_names = [b.name for b in buckets] if buckets else []
-    except Exception as e:
+        _ = [b.name for b in buckets] if buckets else []
+    except Exception:
         pass
 
     try:
         for file in files:
-            # Read file bytes
             contents = await file.read()
 
-            # ✅ Safe file name: allow only letters, numbers, dot, dash, underscore
             original_name = file.filename or "file"
             name_no_spaces = original_name.replace(" ", "_")
             safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", name_no_spaces)
 
             timestamp_ms = int(time.time() * 1000)
-
-            # bugId_timestamp_filename under folder bug-attachments/
             final_filename = f"{bug_id}_{timestamp_ms}_{safe_name}"
             path = f"bug-attachments/{final_filename}"
 
-
-
-            # Upload to Supabase Storage using storage_client (admin if available)
             resp = storage_client.storage.from_(bucket).upload(
                 path,
                 contents,
                 {"content-type": file.content_type or "application/octet-stream"},
             )
 
-
-            # Handle different SDK response shapes
             error = None
             if hasattr(resp, "error") and resp.error:
                 error = resp.error
             elif isinstance(resp, dict) and "error" in resp and resp["error"]:
                 error = resp["error"]
-            elif isinstance(resp, dict) and "statusCode" in resp and str(resp["statusCode"]).startswith("4"):
+            elif isinstance(resp, dict) and "statusCode" in resp and str(
+                resp["statusCode"]
+            ).startswith("4"):
                 error = resp
 
             if error:
                 uploaded.append({"filename": file.filename, "error": str(error)})
                 continue
 
-            # VERIFY: Check if file actually exists in bucket
+            # verify upload
             try:
                 folder_to_list = "bug-attachments"
                 search_name = final_filename
@@ -1220,10 +1171,9 @@ async def upload_bug_attachments(
                     )
                     continue
 
-            except Exception as ve:
+            except Exception:
                 pass
 
-            # Get public URL
             public = storage_client.storage.from_(bucket).get_public_url(path)
 
             if isinstance(public, dict):
@@ -1243,9 +1193,6 @@ async def upload_bug_attachments(
                     or getattr(public, "url", None)
                 )
 
-            if not url:
-                print(f"⚠️ No URL found in response: {public}")
-
             uploaded.append(
                 {
                     "filename": final_filename,
@@ -1254,7 +1201,7 @@ async def upload_bug_attachments(
                 }
             )
 
-        # 🧩 Persist uploaded attachments into the bug row in DB
+        # 🧩 Persist uploaded attachments into the bug row in DB (via REST)
         successful_files = [f for f in uploaded if not f.get("error") and f.get("url")]
 
         if successful_files:
@@ -1265,15 +1212,19 @@ async def upload_bug_attachments(
             # 1) Find the bug row in one of the candidate tables
             for name in CANDIDATE_TABLES:
                 try:
-                    resp = (
-                        supabase.table(name)
-                        .select("Attachments")
-                        .eq("Bug ID", bug_id)
-                        .execute()
+                    params = {
+                        "select": "Attachments",
+                        "Bug ID": f"eq.{bug_id}",
+                    }
+                    resp = requests.get(
+                        f"{SUPABASE_REST_URL}/{name}",
+                        headers=_supabase_headers(),
+                        params=params,
+                        timeout=10,
                     )
-                    if resp.data:
+                    if resp.ok and resp.json():
                         table_found = name
-                        row = resp.data[0]
+                        row = resp.json()[0]
 
                         raw_att = row.get("Attachments") or row.get("attachments") or []
                         if isinstance(raw_att, str):
@@ -1287,33 +1238,33 @@ async def upload_bug_attachments(
 
                         existing_attachments = raw_att
                         break
-                except Exception as e:
+                except Exception:
                     continue
 
             if table_found:
                 new_attachments = existing_attachments + successful_files
 
                 try:
-                    upd = (
-                        supabase.table(table_found)
-                        .update({"Attachments": new_attachments})
-                        .eq("Bug ID", bug_id)
-                        .execute()
+                    params = {"Bug ID": f"eq.{bug_id}"}
+                    headers = _supabase_headers({"Prefer": "return=representation"})
+                    upd = requests.patch(
+                        f"{SUPABASE_REST_URL}/{table_found}",
+                        headers=headers,
+                        params=params,
+                        json={"Attachments": new_attachments},
+                        timeout=10,
                     )
 
-                    if getattr(upd, "error", None):
-                        pass
+                    if not upd.ok:
+                        print("Attachment DB update error:", upd.status_code, upd.text)
                 except Exception as e:
-                    pass
-            else:
-                pass
+                    print("Attachment DB update exception:", e)
 
         return {"status": "success", "files": uploaded}
 
     except Exception as e:
         error_msg = str(e)
 
-        # Check for common RLS error messages
         if "row-level security policy" in error_msg.lower() or "unauthorized" in error_msg.lower():
             detail_msg = (
                 "Upload failed due to Supabase Security Policies (RLS). "
@@ -1326,14 +1277,11 @@ async def upload_bug_attachments(
         raise HTTPException(status_code=500, detail=f"Upload failed: {error_msg}")
 
 
-
-
-
 # ---------- UPDATE BUG ----------
 
 def _update_bug_with_fallback(bug_id: str, payload: Dict[str, Any]):
     """
-    Try to update the bug in several possible tables using the Supabase client.
+    Try to update the bug in several possible tables using Supabase REST.
     """
     errors = []
 
@@ -1342,26 +1290,25 @@ def _update_bug_with_fallback(bug_id: str, payload: Dict[str, Any]):
         payload["Comment"] = json.dumps(payload["Comments"])
         payload.pop("Comments", None)
 
-    # ✅ DO NOT remove Attachments now; frontend sends them after upload
-    # They will be stored into the Attachments JSONB column.
-
     for name in CANDIDATE_TABLES:
         try:
-            resp = (
-                supabase.table(name)
-                .update(payload)
-                .eq("Bug ID", bug_id)
-                .execute()
+            params = {"Bug ID": f"eq.{bug_id}"}
+            headers = _supabase_headers({"Prefer": "return=representation"})
+            resp = requests.patch(
+                f"{SUPABASE_REST_URL}/{name}",
+                headers=headers,
+                params=params,
+                json=payload,
+                timeout=10,
             )
 
-            if getattr(resp, "error", None):
-                errors.append(f"{name}: {resp.error}")
+            if not resp.ok:
+                errors.append(f"{name}: {resp.status_code} {resp.text}")
                 continue
 
-            data = resp.data or []
+            data = resp.json() or []
             if data:
                 return {"status": "success", "data": data}
-            # if no data, BUG ID didn't match in this table, try next
 
         except Exception as e:
             errors.append(f"{name}: {e}")
@@ -1377,7 +1324,6 @@ def _update_bug_with_fallback(bug_id: str, payload: Dict[str, Any]):
 async def update_bug(bug_id: str, request: Request):
     try:
         payload: Dict[str, Any] = await request.json()
-        # ensure Bug ID in the body matches the path param
         payload["Bug ID"] = bug_id
 
         result = _update_bug_with_fallback(bug_id, payload)

@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Card, CardBody, Typography, Input } from "@material-tailwind/react";
 import { supabase } from "../supabaseClient";
+import { useAuth } from "../hooks/useAuth";
 import FormField from "../components/FormField";
 import SearchableSelect from "../components/SearchableSelect";
 import { Eye, Edit } from "lucide-react";
@@ -20,53 +21,6 @@ function PrimaryButton({ children, className = "", ...rest }) {
     </button>
   );
 }
-
-/* ---------- API HELPERS ---------- */
-
-const API_BASE_CANDIDATES = (() => {
-  const list = ["http://127.0.0.1:8000", "http://localhost:8000"];
-  try {
-    const host = window.location.hostname || "localhost";
-    const protocol =
-      window.location.protocol && window.location.protocol.startsWith("https")
-        ? "https"
-        : "http";
-    list.push(`${protocol}://${host}:8000`);
-  } catch (e) {
-    // window may not exist in some environments
-  }
-  return Array.from(new Set(list));
-})();
-
-const fetchJsonWithFallback = async (path, options = {}) => {
-  let lastErr = null;
-
-  for (const base of API_BASE_CANDIDATES) {
-    const url = `${base}${path}`;
-    try {
-      const res = await fetch(url, options);
-      const text = await res.text();
-      let json = null;
-
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch {
-        json = text;
-      }
-
-      if (!res.ok) {
-        lastErr = new Error(
-          `HTTP ${res.status} on ${url} — ${JSON.stringify(json)}`
-        );
-        continue;
-      }
-      return json;
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr || new Error("Fetch failed for all candidate bases");
-};
 
 /* ---------- NORMALIZATION HELPERS ---------- */
 
@@ -233,25 +187,32 @@ const safeLower = (s) => String(s || "").toLowerCase();
 
 /* ---------- SUPABASE HELPERS ---------- */
 
-const SUPABASE_BUG_TABLES = ["bugs", "Bugs_file", "bugs_file"];
+// we now always use the `bugs` table
+const BUG_TABLE_NAME = "bugs";
 
-const fetchBugsFromSupabase = async ({
-  limit = 2000,
-  orderByChanged = false,
-} = {}) => {
-  for (const t of SUPABASE_BUG_TABLES) {
+const sanitizeFileName = (name) => {
+  const noSpaces = name.replace(/\s+/g, "_");
+  return noSpaces.replace(/[^A-Za-z0-9._-]/g, "_");
+};
+
+/**
+ * Build payload that matches DB schema:
+ * - Comments[] (frontend) -> Comment (JSON string in DB)
+ * - Remove Comments key so Supabase doesn't expect "Comments" column
+ */
+const buildDbPayload = (payload) => {
+  const dbPayload = { ...payload };
+
+  if (Array.isArray(payload.Comments)) {
     try {
-      let query = supabase.from(t).select("*").limit(limit);
-      if (orderByChanged) {
-        query = query.order("Changed", { ascending: false });
-      }
-      const { data } = await query;
-      if (data && data.length) return data;
+      dbPayload.Comment = JSON.stringify(payload.Comments);
     } catch {
-      // ignore and try next table
+      dbPayload.Comment = JSON.stringify([]);
     }
   }
-  return [];
+
+  delete dbPayload.Comments;
+  return dbPayload;
 };
 
 // Build a tree from flat comments list based on 'level'
@@ -284,6 +245,7 @@ const buildCommentTree = (flatComments) => {
 const ITEMS_PER_PAGE = 8;
 
 export default function BugsPage() {
+  const { user } = useAuth();
   const [view, setView] = useState("list"); // list | form | details
   const [bugs, setBugs] = useState([]);
   const [selectedBug, setSelectedBug] = useState(null);
@@ -293,6 +255,9 @@ export default function BugsPage() {
   const [files, setFiles] = useState([]); // selected File objects
   const [uploadedFiles, setUploadedFiles] = useState([]); // returned {filename,url}
   const [isEditing, setIsEditing] = useState(false);
+
+  // which Supabase table we ended up using (always "bugs" now)
+  const [bugTable, setBugTable] = useState(BUG_TABLE_NAME);
 
   // pagination
   const [page, setPage] = useState(1);
@@ -351,26 +316,26 @@ export default function BugsPage() {
 
   /* ---------- DATA LOADERS ---------- */
 
+  // load bugs ONLY from `bugs` table in Supabase
   const fetchBugs = async () => {
     setLoading(true);
     try {
-      const data = await fetchJsonWithFallback("/api/bugs");
+      const { data, error } = await supabase
+        .from(BUG_TABLE_NAME)
+        .select("*")
+        .order("Bug ID", { ascending: false }); // use a column that exists
 
-      if (data && data.status === "success") {
-        const arr = Array.isArray(data.data) ? data.data : [];
-        if (arr.length > 0) {
-          setBugs(arr.map(normalizeBug));
-        } else {
-          const fetched = await fetchBugsFromSupabase({ orderByChanged: true });
-          setBugs(fetched.map(normalizeBug));
-        }
-      } else {
-        const fetched = await fetchBugsFromSupabase();
-        setBugs(fetched.map(normalizeBug));
+      if (error) {
+        console.error("Error fetching bugs from Supabase:", error);
+        setBugs([]);
+        return;
       }
-    } catch {
-      const fetched = await fetchBugsFromSupabase();
-      setBugs(fetched.map(normalizeBug));
+
+      setBugTable(BUG_TABLE_NAME);
+      setBugs((data || []).map(normalizeBug));
+    } catch (err) {
+      console.error("Error fetching bugs from Supabase:", err);
+      setBugs([]);
     } finally {
       setLoading(false);
     }
@@ -411,6 +376,18 @@ export default function BugsPage() {
     fetchProductOptions();
   }, []);
 
+  const getCurrentUserName = () => {
+    if (!user) return null;
+    // 1. Custom Auth (user.full_name)
+    if (user.full_name) return user.full_name;
+    // 2. Supabase Auth (user.user_metadata.full_name or name)
+    if (user.user_metadata) {
+      return user.user_metadata.full_name || user.user_metadata.name || user.email;
+    }
+    // 3. Fallback to email or username
+    return user.email || user.username;
+  };
+
   /* ---------- HANDLERS ---------- */
 
   const handleChange = (key, value) =>
@@ -433,32 +410,45 @@ export default function BugsPage() {
     setFiles(validFiles);
   };
 
+  // Upload attachments directly to Supabase Storage
   const uploadAttachments = async (bugId, filesArray) => {
     if (!filesArray || filesArray.length === 0) return [];
-    try {
-      const formData = new FormData();
-      filesArray.forEach((f) => formData.append("files", f, f.name));
+    const uploaded = [];
 
-      const data = await fetchJsonWithFallback(
-        `/api/bugs/${encodeURIComponent(bugId)}/attachments`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+    for (const file of filesArray) {
+      try {
+        const safeName = sanitizeFileName(file.name || "file");
+        const path = `bug-attachments/${bugId}_${Date.now()}_${safeName}`;
 
-      if (!data || data.status !== "success") {
-        console.warn("Attachment upload returned:", data);
-        if (data && data.detail) {
-          alert(`Upload failed: ${data.detail}`);
+        const { data, error } = await supabase.storage
+          .from("bug-attachments")
+          .upload(path, file, {
+            contentType: file.type || "application/octet-stream",
+          });
+
+        if (error) {
+          console.error("Upload error:", error);
+          continue;
         }
-        return [];
+
+        const { data: publicData } = supabase.storage
+          .from("bug-attachments")
+          .getPublicUrl(path);
+
+        const url =
+          publicData?.publicUrl || publicData?.publicURL || publicData?.signedUrl;
+
+        uploaded.push({
+          filename: safeName,
+          url,
+          path,
+        });
+      } catch (err) {
+        console.error("Attachment upload error:", err);
       }
-      return data.files || [];
-    } catch (err) {
-      console.error("Attachment upload error:", err);
-      return [];
     }
+
+    return uploaded;
   };
 
   const handleSubmit = async (e) => {
@@ -470,7 +460,7 @@ export default function BugsPage() {
 
     const description = editCommentDraft.trim();
 
-    const payload = {
+    const payloadBase = {
       ...form,
       "Bug ID": bugId,
       Status: isEditing ? form["Status"] || "OPEN" : "OPEN",
@@ -480,7 +470,7 @@ export default function BugsPage() {
     };
 
     // VALIDATION: Summary is mandatory (Create & Edit)
-    if (!payload.Summary || !payload.Summary.trim()) {
+    if (!payloadBase.Summary || !payloadBase.Summary.trim()) {
       showToast("Summary is required", "error");
       setLoading(false);
       return;
@@ -493,17 +483,32 @@ export default function BugsPage() {
       return;
     }
 
+    const currentUserName =
+      getCurrentUserName() ||
+      form["Reporter"] ||
+      form["Assignee"] ||
+      "Unknown User";
+
+    const payload = { ...payloadBase };
+
     // For CREATE, save description into DB Description (and also first Comment)
     if (!isEditing && description) {
       payload.Description = description;
       payload.Comment = description;
+
+      const firstComment = {
+        text: description,
+        user: currentUserName,
+        timestamp: new Date().toISOString(),
+      };
+      payload.Comments = [...(payload.Comments || []), firstComment];
     }
 
     // For EDIT, append new comment if present
     if (isEditing && description) {
       const newComment = {
         text: description,
-        user: form["Reporter"] || form["Assignee"] || "Unknown User",
+        user: currentUserName,
         timestamp: new Date().toISOString(),
         isReply: replyingToIndex !== null,
       };
@@ -515,75 +520,73 @@ export default function BugsPage() {
         replyingToIndex >= 0 &&
         replyingToIndex < updatedComments.length
       ) {
-        // Insert after the parent
         updatedComments.splice(replyingToIndex + 1, 0, newComment);
       } else {
-        // Append to end
         updatedComments.push(newComment);
       }
       payload.Comments = updatedComments;
     }
 
     try {
-      const path = isEditing
-        ? `/api/bugs/${encodeURIComponent(bugId)}`
-        : "/api/bugs";
-      const method = isEditing ? "PUT" : "POST";
+      let savedRow = null;
+      const dbPayload = buildDbPayload(payload);
 
-      const result = await fetchJsonWithFallback(path, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      if (isEditing) {
+        const { data, error } = await supabase
+          .from(bugTable)
+          .update(dbPayload)
+          .eq("Bug ID", bugId)
+          .select("*")
+          .single();
 
-      if (!result || result.status !== "success") {
-        const msg = result?.detail || JSON.stringify(result);
-        alert("Failed to save bug: " + msg);
-        setLoading(false);
-        return;
+        if (error) throw error;
+        savedRow = data;
+      } else {
+        const { data, error } = await supabase
+          .from(bugTable)
+          .insert(dbPayload)
+          .select("*")
+          .single();
+
+        if (error) throw error;
+        savedRow = data;
       }
 
-      const source = Array.isArray(result.data) ? result.data[0] : result.data;
-      const saved = source ? normalizeBug(source) : null;
+      let saved = normalizeBug(savedRow);
+      const savedId = saved["Bug ID"];
 
-      if (saved) {
-        const savedId = saved["Bug ID"];
+      // Handle file uploads
+      if (files && files.length > 0) {
+        const uploaded = await uploadAttachments(savedId, files);
+        const successful = uploaded.filter((u) => u.url);
 
-        // Handle file uploads
-        if (files && files.length > 0) {
-          const uploaded = await uploadAttachments(savedId, files);
-          const successful = uploaded.filter((u) => u.url && !u.error);
+        const updatedAttachments = [
+          ...(saved.Attachments || []),
+          ...successful,
+        ];
 
-          const updatedAttachments = [
-            ...(saved.Attachments || []),
-            ...successful,
-          ];
+        const { data: updatedData, error: updErr } = await supabase
+          .from(bugTable)
+          .update({ Attachments: updatedAttachments })
+          .eq("Bug ID", savedId)
+          .select("*")
+          .single();
 
-          const updatePayload = {
-            ...saved,
-            Attachments: updatedAttachments,
-          };
-
-          await fetchJsonWithFallback(
-            `/api/bugs/${encodeURIComponent(savedId)}`,
-            {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(updatePayload),
-            }
-          );
-
+        if (!updErr && updatedData) {
+          saved = normalizeBug(updatedData);
+        } else {
           saved.Attachments = updatedAttachments;
-          setUploadedFiles(updatedAttachments);
         }
 
-        setBugs((prev) => {
-          if (isEditing) {
-            return prev.map((b) => (b["Bug ID"] === savedId ? saved : b));
-          }
-          return [saved, ...prev];
-        });
+        setUploadedFiles(saved.Attachments || []);
       }
+
+      setBugs((prev) => {
+        if (isEditing) {
+          return prev.map((b) => (b["Bug ID"] === saved["Bug ID"] ? saved : b));
+        }
+        return [saved, ...prev];
+      });
 
       await fetchBugs();
       setFiles([]);
@@ -621,7 +624,11 @@ export default function BugsPage() {
     try {
       const newComment = {
         text: commentText,
-        user: form["Reporter"] || form["Assignee"] || "Unknown User",
+        user:
+          getCurrentUserName() ||
+          form["Reporter"] ||
+          form["Assignee"] ||
+          "Unknown User",
         timestamp: new Date().toISOString(),
       };
 
@@ -634,33 +641,26 @@ export default function BugsPage() {
         Changed: new Date().toISOString(),
       };
 
-      const result = await fetchJsonWithFallback(
-        `/api/bugs/${encodeURIComponent(bugId)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
+      const dbPayload = buildDbPayload(payload);
+
+      const { data, error } = await supabase
+        .from(bugTable)
+        .update(dbPayload)
+        .eq("Bug ID", bugId)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+
+      const saved = normalizeBug(data);
+
+      setBugs((prev) =>
+        prev.map((b) => (b["Bug ID"] === saved["Bug ID"] ? saved : b))
       );
-
-      if (!result || result.status !== "success") {
-        const msg = result?.detail || JSON.stringify(result);
-        alert("Failed to add comment: " + msg);
-        return;
-      }
-
-      const source = Array.isArray(result.data) ? result.data[0] : result.data;
-      const saved = source ? normalizeBug(source) : null;
-
-      if (saved) {
-        setBugs((prev) =>
-          prev.map((b) => (b["Bug ID"] === saved["Bug ID"] ? saved : b))
-        );
-        setForm(saved);
-        setSelectedBug(saved);
-        setEditCommentDraft("");
-        alert("✅ Comment added");
-      }
+      setForm(saved);
+      setSelectedBug(saved);
+      setEditCommentDraft("");
+      alert("✅ Comment added");
     } catch (err) {
       console.error("Add comment error:", err);
       alert("Network/server error while adding comment (check console)");
@@ -680,28 +680,26 @@ export default function BugsPage() {
     setView("form");
   };
 
-  // Open details: fetch from /api/bugs/{id} so attachments are included
+  // Open details: fetch directly from Supabase
   const openBugDetails = async (bug) => {
     const bugId = bug["Bug ID"];
     if (!bugId) return;
 
     try {
-      const data = await fetchJsonWithFallback(
-        `/api/bugs/${encodeURIComponent(bugId)}`
-      );
+      const { data, error } = await supabase
+        .from(bugTable)
+        .select("*")
+        .eq("Bug ID", bugId)
+        .single();
 
-      if (data && data.status === "success" && data.data) {
-        // backend already returns normalized shape
-        const source = Array.isArray(data.data) ? data.data[0] : data.data;
-
-        const normalized = {
-          ...source,
-          Attachments: Array.isArray(source.Attachments)
-            ? source.Attachments
+      if (!error && data) {
+        const normalized = normalizeBug(data);
+        setSelectedBug({
+          ...normalized,
+          Attachments: Array.isArray(normalized.Attachments)
+            ? normalized.Attachments
             : [],
-        };
-
-        setSelectedBug(normalized);
+        });
       } else {
         setSelectedBug(bug);
       }
@@ -721,7 +719,8 @@ export default function BugsPage() {
       const bugId = selectedBug["Bug ID"];
       const newComment = {
         text: replyDraft.trim(),
-        user: selectedBug["Assignee"] || "Unknown User",
+        user:
+          getCurrentUserName() || selectedBug["Assignee"] || "Unknown User",
         timestamp: new Date().toISOString(),
         isReply: true,
         level: 0,
@@ -785,31 +784,26 @@ export default function BugsPage() {
         Changed: new Date().toISOString(),
       };
 
-      const result = await fetchJsonWithFallback(
-        `/api/bugs/${encodeURIComponent(bugId)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
+      const dbPayload = buildDbPayload(payload);
+
+      const { data, error } = await supabase
+        .from(bugTable)
+        .update(dbPayload)
+        .eq("Bug ID", bugId)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+
+      const saved = normalizeBug(data);
+
+      setSelectedBug(saved);
+      setBugs((prev) =>
+        prev.map((b) => (b["Bug ID"] === saved["Bug ID"] ? saved : b))
       );
-
-      if (!result || result.status !== "success") {
-        throw new Error(result?.detail || "Update failed");
-      }
-
-      const source = Array.isArray(result.data) ? result.data[0] : result.data;
-      const saved = source ? normalizeBug(source) : null;
-
-      if (saved) {
-        setSelectedBug(saved);
-        setBugs((prev) =>
-          prev.map((b) => (b["Bug ID"] === saved["Bug ID"] ? saved : b))
-        );
-        setActiveReplyBox(null);
-        setReplyDraft("");
-        showToast("Reply added successfully");
-      }
+      setActiveReplyBox(null);
+      setReplyDraft("");
+      showToast("Reply added successfully");
     } catch (err) {
       console.error(err);
       showToast("Failed to add reply", "error");
@@ -930,7 +924,6 @@ export default function BugsPage() {
                   <th className="px-4 py-4 text-left font-semibold uppercase text-xs tracking-wider w-44">
                     Last Edited
                   </th>
-                  {/* 🔹 Updated Action heading */}
                   <th className="px-4 py-4 text-center font-semibold uppercase text-xs tracking-wider w-32">
                     <div className="flex flex-col items-center leading-tight">
                       <span>Actions</span>
@@ -1137,16 +1130,20 @@ export default function BugsPage() {
               placeholder="Brief description of the bug"
             />
             <SearchableSelect
-              label="Priority"
-              value={form["Priority"] || "Medium"}
+              label="Select Priority"
+              value={form["Priority"] || ""} // empty when not selected
               onChange={(v) => handleChange("Priority", v)}
               options={[
+                { label: "Select priority", value: "" }, // 👈 placeholder option
                 { label: "Low", value: "Low" },
                 { label: "Medium", value: "Medium" },
                 { label: "High", value: "High" },
                 { label: "Critical", value: "Critical" },
               ]}
             />
+
+
+
 
             <SearchableSelect
               label="Product"
@@ -1535,9 +1532,8 @@ export default function BugsPage() {
                       {(() => {
                         const renderCommentNode = (node, depth = 0) => {
                           const attachment =
-                            (selectedBug.Attachments || [])[
-                            node.originalIndex + 1
-                            ] || null;
+                            (selectedBug.Attachments || [])[node.originalIndex + 1] ||
+                            null;
 
                           return (
                             <div key={node.originalIndex} className="relative">
@@ -1693,7 +1689,8 @@ export default function BugsPage() {
                             ).toLocaleString()
                             : ""}
                       </span>
-                      {activeReplyBox?.type === "description" && activeReplyBox.index === undefined ? null : (
+                      {activeReplyBox?.type === "description" &&
+                        activeReplyBox.index === undefined ? null : (
                         <button
                           onClick={() =>
                             setActiveReplyBox({ type: "description" })
@@ -1739,36 +1736,37 @@ export default function BugsPage() {
                         : "No description available"}
                   </p>
 
-                  {activeReplyBox?.type === "description" && activeReplyBox.index === undefined && (
-                    <div className="mt-4 pt-4 border-t border-borderLight/50">
-                      <textarea
-                        className="w-full p-2 text-sm border rounded-lg focus:ring-2 focus:ring-accent/50 outline-none"
-                        rows={3}
-                        placeholder="Write your reply..."
-                        value={replyDraft}
-                        onChange={(e) => setReplyDraft(e.target.value)}
-                        autoFocus
-                      />
-                      <div className="flex justify-end gap-2 mt-2">
-                        <button
-                          onClick={() => {
-                            setActiveReplyBox(null);
-                            setReplyDraft("");
-                          }}
-                          className="px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={submitInlineReply}
-                          disabled={!replyDraft.trim()}
-                          className="px-3 py-1 text-xs font-bold text-white bg-accent hover:bg-accentDark rounded disabled:opacity-50"
-                        >
-                          Submit
-                        </button>
+                  {activeReplyBox?.type === "description" &&
+                    activeReplyBox.index === undefined && (
+                      <div className="mt-4 pt-4 border-t border-borderLight/50">
+                        <textarea
+                          className="w-full p-2 text-sm border rounded-lg focus:ring-2 focus:ring-accent/50 outline-none"
+                          rows={3}
+                          placeholder="Write your reply..."
+                          value={replyDraft}
+                          onChange={(e) => setReplyDraft(e.target.value)}
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                          <button
+                            onClick={() => {
+                              setActiveReplyBox(null);
+                              setReplyDraft("");
+                            }}
+                            className="px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={submitInlineReply}
+                            disabled={!replyDraft.trim()}
+                            className="px-3 py-1 text-xs font-bold text-white bg-accent hover:bg-accentDark rounded disabled:opacity-50"
+                          >
+                            Submit
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   {/* REPLIES TO DESCRIPTION - Inside the description card with indentation */}
                   {selectedBug.Comments &&
@@ -1785,9 +1783,8 @@ export default function BugsPage() {
                           .reverse()
                           .map((reply) => {
                             const attachment =
-                              (selectedBug.Attachments || [])[
-                              reply.originalIndex + 1
-                              ] || null;
+                              (selectedBug.Attachments || [])[reply.originalIndex + 1] ||
+                              null;
 
                             return (
                               <div
