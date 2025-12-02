@@ -1,1 +1,0 @@
-export const currentUser = { id: 0, name: "You", role: "Admin" };
