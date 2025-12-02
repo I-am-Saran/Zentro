@@ -128,7 +128,7 @@ function App() {
         }
       />
 
-       {/* -------------------- TESTING REQUESTS -------------------- */}
+      {/* -------------------- TESTING REQUESTS -------------------- */}
       <Route
         path="/testing-requests"
         element={
@@ -139,7 +139,6 @@ function App() {
           </ProtectedRoute>
         }
       />
-
       {/* -------------------- FALLBACK -------------------- */}
       <Route
         path="*"
