@@ -8,7 +8,7 @@ import {
   LogOut,
   ChevronRight,
   LayoutDashboard,
-  Key,
+  Key, // ✅ Added this line
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -28,13 +28,19 @@ export default function TopNav({ open, onClose }) {
           .filter((k) => k.startsWith("sb-"))
           .forEach((k) => localStorage.removeItem(k));
       } catch { }
-      try { localStorage.clear(); } catch { }
-      try { sessionStorage.clear(); } catch { }
+      try {
+        localStorage.clear();
+      } catch { }
+      try {
+        sessionStorage.clear();
+      } catch { }
 
       // Navigate and force reload to guarantee a clean slate
       navigate("/login", { replace: true });
       setTimeout(() => {
-        try { window.location.replace("/login"); } catch { }
+        try {
+          window.location.replace("/login");
+        } catch { }
       }, 50);
     }
   };
@@ -44,6 +50,7 @@ export default function TopNav({ open, onClose }) {
     { to: "/bugs", icon: Bug, label: "Bugs" },
     { to: "/tasks", icon: ListTodo, label: "Tasks" },
     { to: "/transtracker", icon: ListTodo, label: "Transtracker" },
+    { to: "/testing-requests", icon: ShieldCheck, label: "Testing Requests" },
     { to: "/users", icon: Users, label: "Users" },
     { to: "/permissions", icon: Key, label: "Permissions" },
     { to: "/settings", icon: Settings, label: "Settings" },
@@ -63,7 +70,7 @@ export default function TopNav({ open, onClose }) {
               <span className="text-lg font-bold text-white">⚗️</span>
             </div>
             <Typography variant="h6" className="font-bold text-white">
-              Nexus
+              NEXUS
             </Typography>
           </Link>
           <button
@@ -130,7 +137,7 @@ export default function TopNav({ open, onClose }) {
           <span>Logout</span>
         </button>
         <Typography className="text-xs text-white/50 mt-3 text-center">
-          v1.0 • Nexus
+          v1.0 • NEXUS
         </Typography>
       </div>
     </aside>

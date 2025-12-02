@@ -10,6 +10,7 @@ import PermissionsPage from "./pages/PermissionsPage";
 import Settings from "./pages/Settings";
 import MainLayout from "./layouts/MainLayout";
 import Transtracker from './pages/Transtracker';
+import TestingRequests from './pages/TestingRequests';
 import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import { AuthProvider } from "./hooks/useAuth";
@@ -127,6 +128,17 @@ function App() {
         }
       />
 
+      {/* -------------------- TESTING REQUESTS -------------------- */}
+      <Route
+        path="/testing-requests"
+        element={
+          <ProtectedRoute>
+            <MainLayout>
+              <TestingRequests />
+            </MainLayout>
+          </ProtectedRoute>
+        }
+      />
       {/* -------------------- FALLBACK -------------------- */}
       <Route
         path="*"
