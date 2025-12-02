@@ -1,0 +1,32 @@
+# backend/services/formatters.py
+def normalize_control(row):
+    # map raw DB columns to stable snake_case keys used by frontend
+    return {
+        "sno": row.get("sno") or row.get("S.No") or row.get("sno_") or row.get("sno"),
+        "id": row.get("id") or row.get("ID"),
+        "analyze_comments": row.get("analyze_comments") or row.get("Analyze Comments"),
+        "observations_action_item": row.get("observations_action_item") or row.get("Observations/Action Item") or row.get("observations_action_item"),
+        "responsible_team": row.get("responsible_team") or row.get("Reponsible Team") or row.get("Responsible Team"),
+        "owner": row.get("owner") or row.get("Owner"),
+        "control_domain": row.get("control_domain") or row.get("Control_Domain") or row.get("Control Domain"),
+        "requirement": row.get("requirement") or row.get("Requirement") or row.get("Requirement (Security Controls)"),
+        "description": row.get("description") or row.get("Description"),
+        "ISO_27001": row.get("ISO_27001") or row.get("ISO 27001"),
+        "NIST_CSF": row.get("NIST_CSF") or row.get("NIST CSF"),
+        "SOC_2": row.get("SOC_2") or row.get("SOC 2"),
+        "GDPR": row.get("GDPR"),
+        "IT_Act_2000": row.get("IT_Act_2000") or row.get("IT Act 2000"),
+        "PCI_DSS": row.get("PCI_DSS") or row.get("PCI DSS"),
+        "HIPAA": row.get("HIPAA"),
+        "Priority": row.get("Priority") or row.get("priority"),
+        "Status": row.get("Status"),
+        "Review_Date": row.get("Review_Date") or row.get("Review Date"),
+        "Audit_Review_Status": row.get("Audit_Review_Status") or row.get("Audit Review Status"),
+        "Comments": row.get("Comments") or row.get("comments"),
+        "Plan": row.get("Plan"),
+        "Do": row.get("Do"),
+        "Check": row.get("Check"),
+        "Act": row.get("Act"),
+        "Date": row.get("Date"),
+        "Comments_1": row.get("Comments_1") or row.get("Comments2") or row.get("Comments 2"),
+    }
