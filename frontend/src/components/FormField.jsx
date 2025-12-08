@@ -1,7 +1,7 @@
 export default function FormField({ label, id: propId, type = "text", value, onChange, options = [], placeholder = "", disabled = false }) {
   const generatedId = typeof label === 'string' ? label.toLowerCase().replace(/\s+/g, '-') : 'field';
   const id = propId || `${generatedId}-field`;
-  const baseClass = "w-full rounded-xl border border-[#DDE6D5] px-3 py-2 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-primary transition";
+  const baseClass = `w-full rounded-xl border border-[#DDE6D5] px-3 py-2 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-primary transition ${disabled ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}`;
   const labelClass = "block text-sm font-medium text-text mb-1";
 
   if (type === "select") {

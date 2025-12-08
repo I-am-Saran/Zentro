@@ -1,5 +1,18 @@
 // src/pages/Dashboard.jsx
 
+// Suppress Recharts dimension warnings during initial render
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  if (
+    typeof args[0] === 'string' &&
+    (args[0].includes('width(-1) and height(-1)') ||
+      args[0].includes('chart should be greater than 0'))
+  ) {
+    return;
+  }
+  originalWarn.apply(console, args);
+};
+
 import { useEffect, useState, useMemo } from "react";
 import { Bug, Users as UsersIcon, TrendingUp, ShieldCheck } from "lucide-react";
 import { Card, CardBody, Typography } from "@material-tailwind/react";
@@ -46,6 +59,9 @@ export default function Dashboard() {
   // comprehensive bugs for charts
   const [allBugs, setAllBugs] = useState([]);
   const [allBugsLoading, setAllBugsLoading] = useState(false);
+
+  // Add state to delay chart rendering until containers are ready
+  const [chartsReady, setChartsReady] = useState(false);
 
   // ---- Transtracker specific states ----
   const today = new Date();
@@ -364,57 +380,21 @@ export default function Dashboard() {
 
   // NEW: fetch distinct values for dropdown filters
   async function fetchTranstrackerFilterOptions() {
+    if (!API_BASE) return;
     try {
-      const { data, error } = await supabase
-        .from("transtrackers")
-        .select(
-          "applicationtype, application, productsegregated, product, projects_products, productowner, owner, spoc"
-        )
-        .limit(5000);
-
-      if (error) {
-        console.error("Supabase fetchTranstrackerFilterOptions error:", error);
+      const url = `${API_BASE.replace(/\/$/, "")}/api/transtracker/filters`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error("Failed to fetch transtracker filters:", res.status);
         return;
       }
-
-      const appSet = new Set();
-      const productSet = new Set();
-      const ownerSet = new Set();
-      const spocSet = new Set();
-
-      (data || []).forEach((r) => {
-        const appVal = (
-          r.applicationtype ??
-          r.application ??
-          ""
-        )
-          .toString()
-          .trim();
-        if (appVal) appSet.add(appVal);
-
-        const productVal = (
-          r.productsegregated ??
-          r.product ??
-          r.projects_products ??
-          ""
-        )
-          .toString()
-          .trim();
-        if (productVal) productSet.add(productVal);
-
-        const ownerVal = (r.productowner ?? r.owner ?? "")
-          .toString()
-          .trim();
-        if (ownerVal) ownerSet.add(ownerVal);
-
-        const spocVal = (r.spoc ?? "").toString().trim();
-        if (spocVal) spocSet.add(spocVal);
-      });
-
-      setTtAppTypeOptions(Array.from(appSet).sort());
-      setTtProductOptions(Array.from(productSet).sort());
-      setTtOwnerOptions(Array.from(ownerSet).sort());
-      setTtSpocOptions(Array.from(spocSet).sort());
+      const json = await res.json();
+      if (json.status === "success" && json.data) {
+        setTtAppTypeOptions(json.data.application_types || []);
+        setTtProductOptions(json.data.products || []);
+        setTtOwnerOptions(json.data.owners || []);
+        setTtSpocOptions(json.data.spocs || []);
+      }
     } catch (err) {
       console.error("fetchTranstrackerFilterOptions error:", err);
     }
@@ -452,7 +432,12 @@ export default function Dashboard() {
       try {
         const res = await supabase
           .from("bugs")
-          .select("*")
+          .select(`
+            "Bug ID",
+            Summary,
+            Priority,
+            Status
+          `)
           .order("Changed", { ascending: false })
           .limit(5);
 
@@ -642,7 +627,18 @@ export default function Dashboard() {
         setAllBugsLoading(true);
         const { data, error } = await supabase
           .from("bugs")
-          .select("*")
+          .select(`
+            "Bug ID",
+            Summary,
+            Priority,
+            Status,
+            Assignee,
+            Changed,
+            Product,
+            Project,
+            Component,
+            Description
+          `)
           .limit(2000);
         if (error) {
           console.error("Error fetching all bugs:", error);
@@ -674,6 +670,14 @@ export default function Dashboard() {
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount only
+
+  // Delay chart rendering to avoid Recharts dimension warnings
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setChartsReady(true);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   // derive ttBarData if missing
   useEffect(() => {
@@ -1096,13 +1100,13 @@ export default function Dashboard() {
                       >
                         Bugs by Status
                       </Typography>
-                      <div className="flex-1 min-h-0">
-                        {bugsByStatus.length === 0 ? (
+                      <div className="flex-1" style={{ minHeight: '240px' }}>
+                        {!chartsReady || bugsByStatus.length === 0 ? (
                           <div className="text-sm text-textMuted">
-                            No bug data to display.
+                            {!chartsReady ? "Loading..." : "No bug data to display."}
                           </div>
                         ) : (
-                          <ResponsiveContainer width="100%" height="100%">
+                          <ResponsiveContainer width="100%" height="100%" key="bugs-by-status">
                             <BarChart
                               layout="vertical"
                               data={bugsByStatus}
@@ -1171,13 +1175,13 @@ export default function Dashboard() {
                       >
                         Bugs by Assignee
                       </Typography>
-                      <div className="flex-1 min-h-0">
+                      <div className="flex-1" style={{ minHeight: '240px' }}>
                         {bugsByAssignee.length === 0 ? (
                           <div className="text-sm text-textMuted">
                             No assignee data to display.
                           </div>
                         ) : (
-                          <ResponsiveContainer width="100%" height="100%">
+                          <ResponsiveContainer width="100%" height="100%" key="bugs-by-assignee">
                             <BarChart
                               layout="vertical"
                               data={bugsByAssignee}
@@ -1252,13 +1256,13 @@ export default function Dashboard() {
                         Number of Bugs by Project
                       </div>
 
-                      <div className="flex-1 min-h-0">
+                      <div className="flex-1" style={{ minHeight: '300px' }}>
                         {bugsByProject.length === 0 ? (
                           <div className="text-sm text-textMuted">
                             No project data to display.
                           </div>
                         ) : (
-                          <ResponsiveContainer width="100%" height="100%">
+                          <ResponsiveContainer width="100%" height="100%" key="bugs-by-project">
                             <BarChart
                               data={bugsByProject}
                               margin={{
@@ -1361,7 +1365,7 @@ export default function Dashboard() {
                           height: "100%",
                         }}
                       >
-                        <ResponsiveContainer width="100%" height={230}>
+                        <ResponsiveContainer width="100%" height={230} key="priority-chart">
                           <BarChart
                             data={priorityData}
                             layout="vertical"
@@ -1484,7 +1488,7 @@ export default function Dashboard() {
                         No user distribution to show.
                       </p>
                     ) : (
-                      <ResponsiveContainer width="100%" height={260}>
+                      <ResponsiveContainer width="100%" height={260} key="user-chart">
                         <PieChart>
                           <Pie
                             data={userChartData}
@@ -1724,7 +1728,7 @@ export default function Dashboard() {
                       ) : ttApplicationTypeDistribution.length === 0 ? (
                         <div className="text-sm text-textMuted">No data</div>
                       ) : (
-                        <ResponsiveContainer width="100%" height={180}>
+                        <ResponsiveContainer width="100%" height={180} key="tt-app-type">
                           <PieChart>
                             <Pie
                               data={ttApplicationTypeDistribution}
@@ -1777,7 +1781,7 @@ export default function Dashboard() {
                       ) : ttOpenByProduct.length === 0 ? (
                         <div className="text-sm text-textMuted">No data</div>
                       ) : (
-                        <ResponsiveContainer width="100%" height={180}>
+                        <ResponsiveContainer width="100%" height={180} key="tt-product">
                           <BarChart
                             data={ttOpenByProduct}
                             margin={{
@@ -1837,7 +1841,7 @@ export default function Dashboard() {
                       ) : ttSignoffStatus.length === 0 ? (
                         <div className="text-sm text-textMuted">No data</div>
                       ) : (
-                        <ResponsiveContainer width="100%" height={180}>
+                        <ResponsiveContainer width="100%" height={180} key="tt-signoff">
                           <PieChart>
                             <Pie
                               data={ttSignoffStatus}
@@ -1897,7 +1901,7 @@ export default function Dashboard() {
                       ) : ttBuildByDateSeries.length === 0 ? (
                         <div className="text-sm text-textMuted">No data</div>
                       ) : (
-                        <ResponsiveContainer width="100%" height={180}>
+                        <ResponsiveContainer width="100%" height={180} key="tt-bugs-trend">
                           <LineChart
                             data={ttBuildByDateSeries}
                             margin={{

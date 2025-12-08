@@ -8,7 +8,7 @@ import {
   LogOut,
   ChevronRight,
   LayoutDashboard,
-  Key, // ✅ Added this line
+  Key,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";

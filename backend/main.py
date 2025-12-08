@@ -833,14 +833,44 @@ def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
         attachments: List[Dict[str, Any]] = raw_attachments
 
+        # 🔹 Additional fields for complete bug data
+        component = row.get("Component") or row.get("component") or ""
+        defect_type = row.get("Defect type") or row.get("defect_type") or ""
+        steps_to_reproduce = row.get("Steps to Reproduce") or row.get("steps_to_reproduce") or ""
+        reporter = row.get("Reporter") or row.get("reporter") or ""
+        resolution = row.get("Resolution") or row.get("resolution") or ""
+        sprint_details = row.get("Sprint details") or row.get("sprint_details") or ""
+        automation_intent = row.get("Automation Intent") or row.get("automation_intent") or ""
+        automation_owner = row.get("automation_owner") or ""
+        automation_status = row.get("automation status") or row.get("automation_status") or ""
+        device_type = row.get("Device type") or row.get("device_type") or ""
+        browser_tested = row.get("Browser tested") or row.get("browser_tested") or ""
+        project_owner = row.get("Project Owner") or row.get("project_owner") or ""
+        project_owner_name = row.get("Project Owner Name") or row.get("project_owner_name") or ""
+        assignee_real_name = row.get("Assignee Real Name") or row.get("assignee_real_name") or ""
+
         return {
             "Bug ID": bug_id,
             "Summary": summary,
             "Priority": priority,
             "Status": status,
             "Assignee": assignee,
+            "Assignee Real Name": assignee_real_name,
             "Changed": changed,
             "Product": product,
+            "Component": component,
+            "Defect type": defect_type,
+            "Steps to Reproduce": steps_to_reproduce,
+            "Reporter": reporter,
+            "Resolution": resolution,
+            "Sprint details": sprint_details,
+            "Automation Intent": automation_intent,
+            "automation_owner": automation_owner,
+            "automation status": automation_status,
+            "Device type": device_type,
+            "Browser tested": browser_tested,
+            "Project Owner": project_owner,
+            "Project Owner Name": project_owner_name,
             "Description": description,
             "Comment": comment_value,  # raw DB column
             "Comments": comments,      # normalized array
@@ -855,8 +885,22 @@ def normalize_bug_row(row: Dict[str, Any]) -> Dict[str, Any]:
             "Priority": "",
             "Status": "",
             "Assignee": "",
+            "Assignee Real Name": "",
             "Changed": "",
             "Product": "",
+            "Component": "",
+            "Defect type": "",
+            "Steps to Reproduce": "",
+            "Reporter": "",
+            "Resolution": "",
+            "Sprint details": "",
+            "Automation Intent": "",
+            "automation_owner": "",
+            "automation status": "",
+            "Device type": "",
+            "Browser tested": "",
+            "Project Owner": "",
+            "Project Owner Name": "",
             "Description": "",
             "Comment": "",
             "Comments": [],
@@ -872,7 +916,7 @@ def _select_bugs_with_fallback():
     for name in CANDIDATE_TABLES:
         try:
             params = {
-                "select": "*",
+                "select": '"Bug ID",Summary,Priority,Status,Assignee,Changed,Product,Project,Component,Description,Comment,Attachments,"Defect type","Steps to Reproduce",Reporter,Resolution,"Sprint details","Automation Intent",automation_owner,"automation status","Device type","Browser tested","Assignee Real Name","Project Owner","Project Owner Name"',
                 "order": "Changed.desc",
             }
             resp = requests.get(
@@ -1408,6 +1452,54 @@ async def get_all_transtrackers():
             error_msg = str(getattr(resp, "error"))
             raise HTTPException(status_code=400, detail=error_msg)
         return {"status": "success", "data": getattr(resp, "data", [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/transtracker/filters")
+async def get_transtracker_filters():
+    """Get distinct filter options for transtracker dashboard."""
+    try:
+        resp = supabase.table("transtrackers").select(
+            "applicationtype, productsegregated, projects_products, productowner, spoc"
+        ).execute()
+        
+        if hasattr(resp, "error") and getattr(resp, "error", None):
+             raise HTTPException(status_code=400, detail=str(getattr(resp, "error")))
+             
+        data = getattr(resp, "data", []) or []
+        
+        app_set = set()
+        product_set = set()
+        owner_set = set()
+        spoc_set = set()
+        
+        for r in data:
+            # Application Type
+            app_val = str(r.get("applicationtype") or "").strip()
+            if app_val: app_set.add(app_val)
+            
+            # Product
+            prod_val = str(r.get("productsegregated") or r.get("projects_products") or "").strip()
+            if prod_val: product_set.add(prod_val)
+            
+            # Owner
+            owner_val = str(r.get("productowner") or "").strip()
+            if owner_val: owner_set.add(owner_val)
+            
+            # SPOC
+            spoc_val = str(r.get("spoc") or "").strip()
+            if spoc_val: spoc_set.add(spoc_val)
+            
+        return {
+            "status": "success",
+            "data": {
+                "application_types": sorted(list(app_set)),
+                "products": sorted(list(product_set)),
+                "owners": sorted(list(owner_set)),
+                "spocs": sorted(list(spoc_set))
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

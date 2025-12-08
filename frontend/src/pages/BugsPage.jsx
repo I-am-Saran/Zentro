@@ -1,4 +1,4 @@
-// src/pages/BugsPage.jsx
+
 import { useEffect, useState, useMemo } from "react";
 import { Card, CardBody, Typography, Input } from "@material-tailwind/react";
 import { supabase } from "../supabaseClient";
@@ -113,6 +113,7 @@ const normalizeBug = (row) => {
     Priority: row?.["Priority"] ?? row?.priority ?? row?.severity ?? "",
     Status: row?.["Status"] ?? row?.status ?? "",
     Assignee: row?.["Assignee"] ?? row?.assignee ?? row?.assignee_name ?? "",
+    "Assignee Real Name": row?.["Assignee Real Name"] ?? row?.assignee_real_name ?? "",
     Changed:
       row?.["Changed"] ??
       row?.changed ??
@@ -120,6 +121,19 @@ const normalizeBug = (row) => {
       new Date().toISOString(),
     Product:
       row?.["Product"] ?? row?.product ?? row?.["Project"] ?? row?.project ?? "",
+    Component: row?.["Component"] ?? row?.component ?? "",
+    "Defect type": row?.["Defect type"] ?? row?.defect_type ?? "",
+    "Steps to Reproduce": row?.["Steps to Reproduce"] ?? row?.steps_to_reproduce ?? "",
+    Reporter: row?.["Reporter"] ?? row?.reporter ?? "",
+    Resolution: row?.["Resolution"] ?? row?.resolution ?? "",
+    "Sprint details": row?.["Sprint details"] ?? row?.sprint_details ?? "",
+    "Automation Intent": row?.["Automation Intent"] ?? row?.automation_intent ?? "",
+    automation_owner: row?.["automation_owner"] ?? row?.automation_owner ?? "",
+    "automation status": row?.["automation status"] ?? row?.automation_status ?? "",
+    "Device type": row?.["Device type"] ?? row?.device_type ?? "",
+    "Browser tested": row?.["Browser tested"] ?? row?.browser_tested ?? "",
+    "Project Owner": row?.["Project Owner"] ?? row?.project_owner ?? "",
+    "Project Owner Name": row?.["Project Owner Name"] ?? row?.project_owner_name ?? "",
 
     Description: descriptionFromRow,
     Comment: commentField,
@@ -211,7 +225,11 @@ const buildDbPayload = (payload) => {
     }
   }
 
+  // Remove frontend-only fields that don't exist in DB
   delete dbPayload.Comments;
+  delete dbPayload["Assignee Real Name"];
+  delete dbPayload["Project Owner Name"];
+
   return dbPayload;
 };
 
@@ -264,6 +282,42 @@ export default function BugsPage() {
 
   // Product dropdown options (from Supabase transtrackers.projects_products)
   const [productOptions, setProductOptions] = useState([]);
+
+  // Users dropdown options
+  const [userOptions, setUserOptions] = useState([]);
+
+  useEffect(() => {
+    const fetchUserOptions = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("id, full_name")
+          .eq("is_active", true)
+          .order("full_name", { ascending: true });
+
+        if (error) {
+          console.error("Error fetching users from Supabase:", error);
+          return;
+        }
+
+        const users = (data || [])
+          .filter((u) => u.full_name && String(u.full_name).trim() !== "")
+          .map((u) => ({
+            label: u.full_name,
+            value: u.id,
+            fullName: u.full_name
+          }));
+
+        setUserOptions(users);
+      } catch (err) {
+        console.error("Unexpected error fetching users:", err);
+      }
+    };
+
+    fetchUserOptions();
+  }, []);
+
+
 
   // loading state for Add Comment on edit page
   const [commentSaving, setCommentSaving] = useState(false);
@@ -323,7 +377,7 @@ export default function BugsPage() {
       const { data, error } = await supabase
         .from(BUG_TABLE_NAME)
         .select("*")
-        .order("Bug ID", { ascending: false }); // use a column that exists
+        .order("Bug ID", { ascending: false });
 
       if (error) {
         console.error("Error fetching bugs from Supabase:", error);
@@ -332,7 +386,60 @@ export default function BugsPage() {
       }
 
       setBugTable(BUG_TABLE_NAME);
-      setBugs((data || []).map(normalizeBug));
+
+      // Normalize bugs
+      const normalizedBugs = (data || []).map(normalizeBug);
+
+      // Fetch all unique assignee IDs (filter out UUIDs only)
+      const assigneeIds = [...new Set(
+        normalizedBugs
+          .map(b => b.Assignee)
+          .filter(id => {
+            if (!id || id.trim() === "") return false;
+            // Check if it looks like a UUID (contains hyphens and is 36 chars)
+            return id.length === 36 && id.includes("-");
+          })
+      )];
+
+      // Fetch assignee names if there are any assignee IDs
+      let assigneeMap = {};
+      if (assigneeIds.length > 0) {
+        try {
+          const { data: usersData, error: usersError } = await supabase
+            .from("users")
+            .select("id, full_name")
+            .in("id", assigneeIds);
+
+          if (!usersError && usersData) {
+            assigneeMap = usersData.reduce((acc, user) => {
+              acc[user.id] = user.full_name;
+              return acc;
+            }, {});
+          }
+        } catch (userErr) {
+          console.error("Failed to fetch assignee names:", userErr);
+        }
+      }
+
+      // Populate Assignee Real Name for each bug
+      const bugsWithNames = normalizedBugs.map(bug => {
+        let assigneeName = bug["Assignee Real Name"] || "";
+
+        // If Assignee looks like a UUID, try to get the name from the map
+        if (bug.Assignee && bug.Assignee.length === 36 && bug.Assignee.includes("-")) {
+          assigneeName = assigneeMap[bug.Assignee] || bug.Assignee;
+        } else {
+          // If Assignee is already a name, use it
+          assigneeName = bug.Assignee || assigneeName;
+        }
+
+        return {
+          ...bug,
+          "Assignee Real Name": assigneeName
+        };
+      });
+
+      setBugs(bugsWithNames);
     } catch (err) {
       console.error("Error fetching bugs from Supabase:", err);
       setBugs([]);
@@ -375,6 +482,7 @@ export default function BugsPage() {
 
     fetchProductOptions();
   }, []);
+
 
   const getCurrentUserName = () => {
     if (!user) return null;
@@ -479,6 +587,76 @@ export default function BugsPage() {
     // VALIDATION: Description is mandatory (Create only)
     if (!isEditing && (!description || !description.trim())) {
       showToast("Description is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Component is mandatory (Create only)
+    if (!isEditing && (!payloadBase.Component || !payloadBase.Component.trim())) {
+      showToast("Component is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Priority is mandatory (Create only)
+    if (!isEditing && (!payloadBase.Priority || !payloadBase.Priority.trim())) {
+      showToast("Priority is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Steps to Reproduce is mandatory (Create only)
+    if (!isEditing && (!payloadBase["Steps to Reproduce"] || !payloadBase["Steps to Reproduce"].trim())) {
+      showToast("Steps to Reproduce is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Defect Type is mandatory (Create only)
+    if (!isEditing && (!payloadBase["Defect type"] || !payloadBase["Defect type"].trim())) {
+      showToast("Defect Type is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Product is mandatory (Create only)
+    if (!isEditing && (!payloadBase.Product || !payloadBase.Product.trim())) {
+      showToast("Product is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Assignee is mandatory (Create only)
+    if (!isEditing && (!payloadBase.Assignee || !payloadBase.Assignee.trim())) {
+      showToast("Assignee is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Sprint Details is mandatory (Create only)
+    if (!isEditing && (!payloadBase["Sprint details"] || !payloadBase["Sprint details"].trim())) {
+      showToast("Sprint Details is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Device Type is mandatory (Create only)
+    if (!isEditing && (!payloadBase["Device type"] || !payloadBase["Device type"].trim())) {
+      showToast("Device Type is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Browser Tested is mandatory (Create only)
+    if (!isEditing && (!payloadBase["Browser tested"] || !payloadBase["Browser tested"].trim())) {
+      showToast("Browser Tested is required", "error");
+      setLoading(false);
+      return;
+    }
+
+    // VALIDATION: Attachments are mandatory (Create only)
+    if (!isEditing && (!files || files.length === 0) && (!payloadBase.Attachments || payloadBase.Attachments.length === 0)) {
+      showToast("At least one attachment is required", "error");
       setLoading(false);
       return;
     }
@@ -694,6 +872,41 @@ export default function BugsPage() {
 
       if (!error && data) {
         const normalized = normalizeBug(data);
+
+        // Fetch assignee full name if not already present
+        if (normalized.Assignee && !normalized["Assignee Real Name"]) {
+          try {
+            const { data: userData, error: userError } = await supabase
+              .from("users")
+              .select("full_name")
+              .eq("id", normalized.Assignee)
+              .single();
+
+            if (!userError && userData) {
+              normalized["Assignee Real Name"] = userData.full_name;
+            }
+          } catch (userErr) {
+            console.error("Failed to fetch assignee name:", userErr);
+          }
+        }
+
+        // Fetch project owner full name if not already present
+        if (normalized["Project Owner"] && !normalized["Project Owner Name"]) {
+          try {
+            const { data: ownerData, error: ownerError } = await supabase
+              .from("users")
+              .select("full_name")
+              .eq("id", normalized["Project Owner"])
+              .single();
+
+            if (!ownerError && ownerData) {
+              normalized["Project Owner Name"] = ownerData.full_name;
+            }
+          } catch (ownerErr) {
+            console.error("Failed to fetch project owner name:", ownerErr);
+          }
+        }
+
         setSelectedBug({
           ...normalized,
           Attachments: Array.isArray(normalized.Attachments)
@@ -981,8 +1194,8 @@ export default function BugsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-4 text-text w-40">
-                        <div className="truncate" title={b["Assignee"] || "-"}>
-                          {b["Assignee"] || "-"}
+                        <div className="truncate" title={b["Assignee Real Name"] || b["Assignee"] || "-"}>
+                          {b["Assignee Real Name"] || b["Assignee"] || "-"}
                         </div>
                       </td>
                       <td className="px-4 py-4 text-text text-xs whitespace-nowrap w-44">
@@ -1109,8 +1322,8 @@ export default function BugsPage() {
             className="grid grid-cols-1 md:grid-cols-2 gap-6"
           >
             <SearchableSelect
-              label="Defect Type"
-              value={form["Defect type"] || "Functional"}
+              label={<span>Defect Type <span className="text-red-500">*</span></span>}
+              value={form["Defect type"] || ""}
               onChange={(v) => handleChange("Defect type", v)}
               options={[
                 { label: "Functional", value: "Functional" },
@@ -1130,27 +1343,32 @@ export default function BugsPage() {
               placeholder="Brief description of the bug"
             />
             <SearchableSelect
-              label="Select Priority"
-              value={form["Priority"] || ""} // empty when not selected
+              label={<span>Select Priority <span className="text-red-500">*</span></span>}
+              value={form["Priority"] || ""}
               onChange={(v) => handleChange("Priority", v)}
               options={[
-                { label: "Select priority", value: "" }, // 👈 placeholder option
                 { label: "Low", value: "Low" },
                 { label: "Medium", value: "Medium" },
                 { label: "High", value: "High" },
                 { label: "Critical", value: "Critical" },
               ]}
             />
+            <FormField
+              label={<span>Steps to Reproduce <span className="text-red-500">*</span></span>}
+              type="textarea"
+              value={form["Steps to Reproduce"] || ""}
+              onChange={(e) => handleChange("Steps to Reproduce", e.target.value)}
+              placeholder="Detailed steps to reproduce the issue"
+            />
 
 
 
 
             <SearchableSelect
-              label="Product"
+              label={<span>Product <span className="text-red-500">*</span></span>}
               value={form["Product"] || ""}
               onChange={(v) => handleChange("Product", v)}
               options={[
-                { label: "Select product", value: "" },
                 ...productOptions.map((p) => ({
                   label: p,
                   value: p,
@@ -1159,59 +1377,68 @@ export default function BugsPage() {
             />
 
             <FormField
-              label="Component"
+              label={<span>Component <span className="text-red-500">*</span></span>}
               value={form["Component"] || ""}
               onChange={(e) => handleChange("Component", e.target.value)}
               placeholder="Component affected"
             />
-            <FormField
-              label="Assignee"
+            <SearchableSelect
+              label={<span>Assignee <span className="text-red-500">*</span></span>}
               value={form["Assignee"] || ""}
-              onChange={(e) => handleChange("Assignee", e.target.value)}
-              placeholder="Team member"
+              onChange={(selectedUserId) => {
+                // Find the selected user from userOptions
+                const selectedUser = userOptions.find((u) => u.value === selectedUserId);
+
+                // Set Assignee to user ID and Assignee Real Name to full name
+                handleChange("Assignee", selectedUserId);
+                handleChange("Assignee Real Name", selectedUser?.fullName || "");
+              }}
+              options={[
+                ...userOptions,
+              ]}
             />
-            <FormField
-              label="Assignee Real Name"
-              value={form["Assignee Real Name"] || ""}
-              onChange={(e) =>
-                handleChange("Assignee Real Name", e.target.value)
-              }
-              placeholder="Full name"
-            />
-            <FormField
-              label="Reporter"
-              value={form["Reporter"] || ""}
-              onChange={(e) => handleChange("Reporter", e.target.value)}
-              placeholder="Bug reporter"
+            <SearchableSelect
+              label="Project Owner"
+              value={form["Project Owner"] || ""}
+              onChange={(selectedUserId) => {
+                const selectedUser = userOptions.find((u) => u.value === selectedUserId);
+                handleChange("Project Owner", selectedUserId);
+                handleChange("Project Owner Name", selectedUser?.fullName || "");
+              }}
+              options={[
+                ...userOptions,
+              ]}
             />
 
             {/* STATUS FIELD */}
-            {isEditing ? (
-              <SearchableSelect
-                label="Status"
-                value={form["Status"] || "OPEN"}
-                onChange={(v) => handleChange("Status", v)}
-                options={[
-                  { label: "OPEN", value: "OPEN" },
-                  { label: "IN PROGRESS", value: "IN PROGRESS" },
-                  { label: "RESOLVED", value: "RESOLVED" },
-                  { label: "REOPENED", value: "REOPENED" },
-                  { label: "CLOSED", value: "CLOSED" },
-                ]}
-              />
-            ) : (
-              <div>
-                <label className="block text-sm font-semibold text-primary mb-1">
-                  Status
-                </label>
-                <input
-                  type="text"
-                  value="OPEN"
-                  disabled
-                  className="w-full px-3 py-2 rounded-lg border border-borderLight bg-gray-100 text-gray-700 cursor-not-allowed"
+            {
+              isEditing ? (
+                <SearchableSelect
+                  label="Status"
+                  value={form["Status"] || "OPEN"}
+                  onChange={(v) => handleChange("Status", v)}
+                  options={[
+                    { label: "OPEN", value: "OPEN" },
+                    { label: "IN PROGRESS", value: "IN PROGRESS" },
+                    { label: "RESOLVED", value: "RESOLVED" },
+                    { label: "REOPENED", value: "REOPENED" },
+                    { label: "CLOSED", value: "CLOSED" },
+                  ]}
                 />
-              </div>
-            )}
+              ) : (
+                <div>
+                  <label className="block text-sm font-semibold text-primary mb-1">
+                    Status
+                  </label>
+                  <input
+                    type="text"
+                    value="OPEN"
+                    disabled
+                    className="w-full px-3 py-2 rounded-lg border border-borderLight bg-gray-100 text-gray-700 cursor-not-allowed"
+                  />
+                </div>
+              )
+            }
 
             <FormField
               label="Resolution"
@@ -1220,14 +1447,14 @@ export default function BugsPage() {
               placeholder="Resolution details"
             />
             <FormField
-              label="Sprint details"
+              label={<span>Sprint details <span className="text-red-500">*</span></span>}
               value={form["Sprint details"] || ""}
               onChange={(e) => handleChange("Sprint details", e.target.value)}
               placeholder="Sprint info"
             />
             <SearchableSelect
               label="Automation Intent"
-              value={form["Automation Intent"] || "No"}
+              value={form["Automation Intent"] || ""}
               onChange={(v) => handleChange("Automation Intent", v)}
               options={[
                 { label: "Yes", value: "Yes" },
@@ -1242,17 +1469,18 @@ export default function BugsPage() {
             />
             <SearchableSelect
               label="Automation Status"
-              value={form["automation status"] || "Pending"}
+              value={form["automation status"] || ""}
               onChange={(v) => handleChange("automation status", v)}
               options={[
+
                 { label: "Pending", value: "Pending" },
                 { label: "Automated", value: "Automated" },
                 { label: "Skipped", value: "Skipped" },
               ]}
             />
             <SearchableSelect
-              label="Device type"
-              value={form["Device type"] || "Web"}
+              label={<span>Device type <span className="text-red-500">*</span></span>}
+              value={form["Device type"] || ""}
               onChange={(v) => handleChange("Device type", v)}
               options={[
                 { label: "Web", value: "Web" },
@@ -1260,11 +1488,17 @@ export default function BugsPage() {
                 { label: "Tablet", value: "Tablet" },
               ]}
             />
-            <FormField
-              label="Browser tested"
+            <SearchableSelect
+              label={<span>Browser tested <span className="text-red-500">*</span></span>}
               value={form["Browser tested"] || ""}
-              onChange={(e) => handleChange("Browser tested", e.target.value)}
-              placeholder="Browser name"
+              onChange={(v) => handleChange("Browser tested", v)}
+              options={[
+                { label: "Chrome", value: "Chrome" },
+                { label: "Firefox", value: "Firefox" },
+                { label: "Safari", value: "Safari" },
+                { label: "Opera", value: "Opera" },
+                { label: "Mobile App", value: "Mobile App" },
+              ]}
             />
 
             {/* Description / Comment + Add Comment button */}
@@ -1297,7 +1531,7 @@ export default function BugsPage() {
 
             <div className="col-span-1 md:col-span-2">
               <label className="block text-sm font-semibold text-primary mb-3">
-                📎 Attachments (screenshots, logs)
+                📎 Attachments (screenshots, logs) <span className="text-red-500">*</span>
               </label>
               <div className="border-2 border-dashed border-borderLight rounded-lg p-6 hover:border-accent hover:bg-accent/5 transition-all cursor-pointer relative">
                 <input
@@ -1450,25 +1684,40 @@ export default function BugsPage() {
 
                   {/* OTHER FIELDS */}
                   <div className="border-t border-borderLight/60 pt-6 grid grid-cols-2 gap-6">
-                    {Object.keys(selectedBug).map((k) =>
-                      k !== "Bug ID" &&
-                        k !== "Summary" &&
-                        k !== "Priority" &&
-                        k !== "Status" &&
-                        k !== "Comments" &&
-                        k !== "Attachments" &&
-                        k !== "Description" &&
-                        k !== "Comment" ? (
+                    {Object.keys(selectedBug).map((k) => {
+                      if (
+                        k === "Bug ID" ||
+                        k === "Summary" ||
+                        k === "Priority" ||
+                        k === "Status" ||
+                        k === "Comments" ||
+                        k === "Attachments" ||
+                        k === "Description" ||
+                        k === "Comment" ||
+                        k === "Assignee Real Name" ||
+                        k === "Project Owner Name"
+                      ) {
+                        return null;
+                      }
+
+                      let displayValue = selectedBug[k];
+                      if (k === "Assignee") {
+                        displayValue = selectedBug["Assignee Real Name"] || displayValue;
+                      } else if (k === "Project Owner") {
+                        displayValue = selectedBug["Project Owner Name"] || displayValue;
+                      }
+
+                      return (
                         <div key={k}>
                           <Typography className="text-xs font-bold text-textMuted uppercase tracking-wide mb-1">
                             {k}
                           </Typography>
                           <Typography className="text-sm text-text font-medium break-words">
-                            {String(selectedBug[k] ?? "-")}
+                            {String(displayValue ?? "-")}
                           </Typography>
                         </div>
-                      ) : null
-                    )}
+                      );
+                    })}
                   </div>
                 </CardBody>
               </Card>
@@ -1487,7 +1736,7 @@ export default function BugsPage() {
                         Assignee
                       </div>
                       <div className="text-sm font-bold text-blue-700">
-                        {selectedBug["Assignee"] || "Unassigned"}
+                        {selectedBug["Assignee Real Name"] || selectedBug["Assignee"] || "Unassigned"}
                       </div>
                     </div>
                     <div className="bg-primary/10 rounded-lg p-3 border border-primary/30">

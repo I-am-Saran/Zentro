@@ -37,6 +37,12 @@ export default function SearchableSelect({
     return match ? (match.label || match.value || match) : "";
   }, [options, value]);
 
+  // Extract text from label (handle both string and JSX)
+  const getLabelText = () => {
+    if (typeof label === 'string') return label.toLowerCase();
+    return 'options';
+  };
+
   return (
     <div className={className} ref={containerRef}>
       {label && (
@@ -67,7 +73,7 @@ export default function SearchableSelect({
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder={`Search ${label?.toLowerCase() || "options"}...`}
+                placeholder={`Search ${getLabelText()}...`}
                 className="w-full rounded-lg bg-white border border-neutral-300 px-3 py-2 text-sm text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-primary"
               />
             </div>
@@ -84,9 +90,8 @@ export default function SearchableSelect({
                       setOpen(false);
                       setQ("");
                     }}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${
-                      (opt.value || opt) === value ? "bg-accent/20 text-accent" : "text-gray-800"
-                    }`}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-accent/10 ${(opt.value || opt) === value ? "bg-accent/20 text-accent" : "text-gray-800"
+                      }`}
                   >
                     {opt.label || opt}
                   </button>
