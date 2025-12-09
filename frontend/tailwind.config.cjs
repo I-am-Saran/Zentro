@@ -8,24 +8,29 @@ module.exports = withMT({
   theme: {
     extend: {
       colors: {
-        /* Modern, vibrant Alchemy palette with gradients support */
-        primary: '#2D5F4F',        // deep emerald for headings and primary UI
-        primaryLight: '#4A7C6B',   // lighter emerald for hover states
-        primaryDark: '#1a3a31',    // darker emerald for active states
-        secondary: '#6BA898',      // sage green for secondary text/elements
-        secondaryLight: '#92C4B6', // lighter sage for backgrounds
-        accent: '#00D9A3',         // vibrant teal accent for highlights
-        accentLight: '#33E5B2',    // lighter teal for hover effects
-        accentDark: '#00B88A',     // darker teal for active states
-        background: '#FFFFFF',     // base page background
-        backgroundAlt: '#F8FBFA',  // subtle alt background
-        card: '#F6F8F5',           // off-white green-tinted card surface
-        cardDark: '#E8F0ED',       // darker card variant
-        text: '#0F1419',           // near-black for readable body copy
-        textLight: '#4B5563',      // light gray text
-        textMuted: '#9CA3AF',      // muted gray text
-        border: '#D1D5DB',         // border color
-        borderLight: '#E5E7EB',    // light border
+        /* Palette aligned with master branch UI colors */
+        primary: '#E39A7B',
+        primaryLight: '#FFB5AB',
+        primaryDark: '#DBB06B',
+        secondary: '#FFD3AC',
+        secondaryLight: '#FFE1C6',
+        accent: '#DBB06B',
+        accentLight: '#EBC07C',
+        accentDark: '#C49A5D',
+        background: '#FFF6EC',
+        backgroundAlt: '#FFF1E4',
+        card: '#FFFFFF',
+        cardDark: '#FFF0E1',
+        text: '#1A1D1F',
+        textLight: '#4B5563',
+        textMuted: '#9CA3AF',
+        border: '#D1D5DB',
+        borderLight: '#E5E7EB',
+        /* Brand aliases present in master for gradients */
+        brandCoral: '#E39A7B',
+        brandPeach: '#FFB5AB',
+        brandGold: '#DBB06B',
+        brandPurple: '#8B5CF6',
         success: '#10B981',        // green success
         warning: '#F59E0B',        // amber warning
         error: '#EF4444',          // red error

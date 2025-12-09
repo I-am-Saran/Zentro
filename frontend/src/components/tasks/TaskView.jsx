@@ -40,7 +40,7 @@ export default function TaskView({ data = {} }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
         <div className="p-3 rounded-xl bg-white border border-neutral-200">
           <div className="text-gray-600">Task ID</div>
-          <div className="text-gray-900 font-medium">{data.id ?? "—"}</div>
+          <div className="text-gray-900 font-medium">{data.serial ?? data.id ?? "—"}</div>
         </div>
         <div className="p-3 rounded-xl bg-white border border-neutral-200">
           <div className="text-gray-600">Due Date</div>

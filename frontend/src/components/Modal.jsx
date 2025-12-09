@@ -11,11 +11,12 @@ export default function Modal({
   confirmText = "Confirm",
   onConfirm,
   variant = "default",
+  size = "md",
 }) {
   const isModern = variant === "modern";
 
   return (
-    <Dialog open={open} handler={onClose} dismiss={{ enabled: true }} className="z-50">
+    <Dialog open={open} handler={onClose} dismiss={{ enabled: true }} className="z-50" size={size}>
       {title && (
         <DialogHeader
           className={
@@ -36,7 +37,7 @@ export default function Modal({
       <DialogBody
         className={
           isModern
-            ? "w-full max-h-[80vh] overflow-y-auto bg-transparent px-6 pt-6 text-gray-800"
+            ? "w-full max-h-[80vh] overflow-y-auto bg-white px-6 pt-6 text-gray-800"
             : "w-full mx-4 max-w-3xl max-h-[80vh] overflow-y-auto rounded-xl bg-white p-6 text-gray-800"
         }
       >

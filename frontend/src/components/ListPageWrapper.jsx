@@ -42,6 +42,7 @@ export default function ListPageWrapper({
   exportFunctions = {},
   renderActions, // optional custom actions renderer
   modalVariant = "default", // forwarded to Modal
+  showBackButton = true,
 }) {
   // Search / Filter / Sort
   const [q, setQ] = useState("");
@@ -92,7 +93,7 @@ export default function ListPageWrapper({
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BackButton />
+            {showBackButton ? <BackButton /> : null}
             <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
           </div>
           <Button
@@ -312,6 +313,8 @@ export default function ListPageWrapper({
           title="Delete Item?"
           confirmText="Delete"
           onConfirm={onDeleteConfirm}
+          variant={modalVariant}
+          size="sm"
         >
           <p className="text-gray-800">
             This action cannot be undone. Are you sure you want to delete this item?

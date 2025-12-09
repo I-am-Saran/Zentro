@@ -2,9 +2,7 @@
 import { Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import BugsPage from "./pages/BugsPage";
-import TasksList from "./pages/TasksList";
-import TaskDetails from "./pages/TaskDetails";
-import TaskForm from "./pages/TaskForm";
+import { TasksList, TaskDetails, TaskForm } from "./pages/Task";
 import UsersPage from "./pages/UsersPage";
 import PermissionsPage from "./pages/PermissionsPage";
 import Settings from "./pages/Settings";

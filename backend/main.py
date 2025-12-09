@@ -7,6 +7,7 @@ from backend.services.supabase_client import supabase, supabase_admin, verify_su
 from backend.services.formatters import normalize_control
 from datetime import datetime, timezone
 import re
+from uuid import uuid4
 from supabase import create_client
 
 
@@ -173,6 +174,77 @@ def auth_guard(authorization: Optional[str]) -> Dict[str, Any]:
 
     raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+@app.post("/api/auth/sso-sync")
+async def sync_sso_user(request: Request):
+    """
+    Syncs SSO user details to public.users table.
+    """
+    try:
+        payload = await request.json()
+        email = (payload.get("email") or "").strip().lower()
+        full_name = (payload.get("full_name") or "").strip()
+        sso_user_id = (payload.get("sso_user_id") or "").strip()
+        avatar_url = payload.get("avatar_url")
+        provider = payload.get("provider") or "sso"
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        # Check if user exists
+        # Use limit(1) instead of single() to avoid crash if not found
+        resp = supabase.table("users").select("*").eq("email", email).limit(1).execute()
+        existing_user = resp.data[0] if resp.data else None
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if existing_user:
+            # Update existing user
+            update_data = {
+                "updated_at": now_iso
+            }
+            if full_name and not existing_user.get("full_name"):
+                 update_data["full_name"] = full_name
+            if sso_user_id:
+                 update_data["sso_user_id"] = sso_user_id
+            # profile_pic_url not in schema, skipping
+            if provider and not existing_user.get("sso_provider"):
+                 update_data["sso_provider"] = provider
+            
+            # If user was inactive, maybe reactivate? For now let's keep status as is unless it's new
+            
+            upd_resp = supabase.table("users").update(update_data).eq("id", existing_user["id"]).execute()
+            if hasattr(upd_resp, "error") and getattr(upd_resp, "error", None):
+                 logger.error(f"Failed to update SSO user: {upd_resp.error}")
+            
+            return {"status": "success", "action": "updated", "user": existing_user}
+        else:
+            # Create new user
+            username = email.split("@")[0]
+            new_user = {
+                "email": email,
+                "username": username,
+                "full_name": full_name or username,
+                "role": "User", # Default role
+                "is_active": True,
+                "sso_provider": provider,
+                "sso_user_id": sso_user_id,
+                # profile_pic_url not in schema, skipping
+                "created_at": now_iso,
+                "updated_at": now_iso
+            }
+            
+            ins_resp = supabase.table("users").insert(new_user).execute()
+            if hasattr(ins_resp, "error") and getattr(ins_resp, "error", None):
+                raise HTTPException(status_code=500, detail=str(getattr(ins_resp, "error")))
+            
+            created_data = getattr(ins_resp, "data", []) or []
+            return {"status": "success", "action": "created", "user": created_data[0] if created_data else None}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SSO Sync error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/api/login")
 async def login(request: Request):
     """
@@ -256,6 +328,7 @@ async def search_users(q: str = Query(default=""), Authorization: Optional[str] 
         raise he
     except Exception as e:
         return {"data": None, "error": str(e)}
+
 
 
  
@@ -1585,8 +1658,9 @@ def _count_table(table_name: str, select_col: str = '"id"') -> Tuple[int, Option
     Robust count for a Supabase table.
     Attempts:
       - select(select_col, count="exact")
-      - fallback to select('"Bug ID"', count="exact') for likely Bug sheet
+      - fallback to select('"Bug ID"', count="exact") for likely Bug sheet
       - fallback to select("id", count="exact")
+
       - fallback to fetching data and len(data)
 
     Returns (count, error_message)
@@ -2438,6 +2512,109 @@ async def get_dev_tools(request: Request, current_user: dict = Depends(verify_su
         logger.error(f"Error fetching dev tools: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# include router under /api
+app.include_router(router, prefix="/api")
+
+# optional: root health check
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "transtracker"}
+
+@app.get("/api")
+def api_root():
+    return {"status": "ok"}
+
+@app.get("/api/tasks")
+def get_tasks():
+    try:
+        try:
+            resp = supabase.table("tasks").select("*").order("created_at", desc=True).execute()
+        except Exception:
+            resp = supabase.table("tasks").select("*").execute()
+        rows = resp.data or []
+        return {"status": "success", "data": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/tasks")
+async def create_task(request: Request):
+    try:
+        payload = await request.json()
+        title = (payload.get("title") or "").strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="Title is required")
+        # tenant_id removed from insert to avoid schema cache errors in environments without this column
+        created_by_val = (payload.get("createdBy") or "").strip()
+        due_date_val = (payload.get("dueDate") or "").strip()
+        meta_tag = f"[meta] due={due_date_val} created_by={created_by_val}".strip()
+        new_id = str(uuid4())
+        now_iso = datetime.now(timezone.utc).isoformat()
+        
+        # Prepare full payload for single insert
+        assigned_to_val = (payload.get("assignedTo") or "").strip()
+        priority_val = (payload.get("priority") or "medium").strip()
+        note_val = ((payload.get("description") or "").strip() + (f"\n\n{meta_tag}" if meta_tag else "")).strip()
+
+        try:
+            base = {
+                "id": new_id,
+                "task_name": title,
+                "task_status": (payload.get("status") or "todo").strip(),
+                "task_priority": priority_val,
+                "assigned_to": assigned_to_val,
+                "task_note": note_val,
+                "created_at": now_iso
+            }
+            resp1 = supabase.table("tasks").insert(base, returning="representation").execute()
+            if getattr(resp1, "error", None):
+                raise HTTPException(status_code=400, detail=str(resp1.error))
+            
+            inserted_rows = getattr(resp1, "data", []) or []
+            if not inserted_rows:
+                 # Fallback: if data is empty, maybe try to fetch it
+                 final = supabase.table("tasks").select("*").eq("id", new_id).execute()
+                 inserted_rows = getattr(final, "data", []) or []
+                 
+            if not inserted_rows:
+                 # If still empty, return what we sent but it might be missing DB-generated fields if any
+                 # But since we provided ID and others, it should be fine.
+                 return {"status": "success", "data": base}
+
+            inserted = inserted_rows[0]
+            return {"status": "success", "data": inserted}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# moved to end of file after all endpoints are registered
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str):
+    try:
+        resp = supabase.table("tasks").delete().eq("id", task_id).execute()
+        return {"status": "success", "data": resp.data or []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/tasks")
+def delete_task_by_query(task_name: str = Query(...), task_status: Optional[str] = Query(None)):
+    try:
+        q = supabase.table("tasks").delete().eq("task_name", task_name)
+        if task_status:
+            q = q.eq("task_status", task_status)
+        resp = q.execute()
+        return {"status": "success", "data": resp.data or []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+

@@ -1,10 +1,10 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 async function request(path, options = {}) {
-  if (!BASE_URL) {
-    throw new Error("API base URL not configured. Set VITE_API_BASE_URL.");
-  }
-  const res = await fetch(`${BASE_URL}${path}`, {
+  // If BASE_URL is not set, we assume relative path (proxy in dev, same origin in prod)
+  const url = BASE_URL ? `${BASE_URL}${path}` : path;
+  
+  const res = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
@@ -16,7 +16,9 @@ async function request(path, options = {}) {
     body = await res.text();
   }
   if (!res.ok) {
-    const msg = body?.message || (typeof body === "string" ? body : "Request failed");
+    const msg =
+      (body && typeof body === "object" && (body.detail || body.message)) ||
+      (typeof body === "string" ? body : "Request failed");
     throw new Error(msg);
   }
   return body;

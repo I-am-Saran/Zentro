@@ -1,6 +1,7 @@
 // src/hooks/useAuth.js
 import { useEffect, useState, createContext, useContext } from "react";
 import { supabase } from "../supabaseClient";
+import { post } from "../services/api";
 
 const AuthContext = createContext();
 
@@ -8,6 +9,29 @@ export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Helper to sync SSO user
+  const syncSsoUser = async (sessionUser) => {
+    if (!sessionUser || !sessionUser.email) return;
+    
+    // Skip if it's a custom login (which might lack provider metadata in the same way)
+    // Actually, custom login sets user manually, so sessionUser here comes from Supabase Auth
+    // which means it IS an SSO user (or magic link).
+    
+    try {
+      const payload = {
+        email: sessionUser.email,
+        full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || "",
+        avatar_url: sessionUser.user_metadata?.avatar_url || "",
+        sso_user_id: sessionUser.id,
+        provider: sessionUser.app_metadata?.provider || "sso"
+      };
+      
+      await post("/api/auth/sso-sync", payload);
+    } catch (e) {
+      console.error("Failed to sync SSO user:", e);
+    }
+  };
 
   useEffect(() => {
     // 1. Check Supabase Session (SSO)
@@ -17,6 +41,7 @@ export const AuthProvider = ({ children }) => {
       if (sbSession) {
         setSession(sbSession);
         setUser(sbSession.user);
+        syncSsoUser(sbSession.user);
       } else {
         // 2. Check Local Storage (Custom Auth)
         const localToken = localStorage.getItem("auth_token");
@@ -45,6 +70,10 @@ export const AuthProvider = ({ children }) => {
         // Clear local auth if Supabase takes over
         localStorage.removeItem("auth_token");
         localStorage.removeItem("auth_user");
+        
+        if (_event === "SIGNED_IN") {
+            syncSsoUser(session.user);
+        }
       } else {
          // Only clear state if we don't have a local token fallback
          // But usually onAuthStateChange(SIGNED_OUT) means we should clear everything

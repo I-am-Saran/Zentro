@@ -70,7 +70,7 @@ export default function TopNav({ open, onClose }) {
               <span className="text-lg font-bold text-white">⚗️</span>
             </div>
             <Typography variant="h6" className="font-bold text-white">
-              NEXUS
+              Zentro
             </Typography>
           </Link>
           <button
@@ -137,7 +137,7 @@ export default function TopNav({ open, onClose }) {
           <span>Logout</span>
         </button>
         <Typography className="text-xs text-white/50 mt-3 text-center">
-          v1.0 • NEXUS
+          v1.0 • Zentro
         </Typography>
       </div>
     </aside>

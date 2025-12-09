@@ -49,32 +49,25 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#e9f0ec] via-[#e4ede7] to-[#dfe8e2]">
-      {/* Glass / neumorphic card */}
-      <div className="w-[90%] max-w-md bg-[#f9faf9]/90 backdrop-blur-md border border-[#d3ddd6] rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.05)] p-8 text-center">
-        {/* Icon section */}
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brandPeach via-brandCoral to-backgroundAlt">
+      <div className="w-[90%] max-w-md bg-white/95 backdrop-blur-md border border-borderLight rounded-2xl shadow-[0_12px_40px_rgba(219,176,107,0.25)] p-8 text-center">
         <div className="flex justify-center mb-5">
-          <div className="p-4 bg-gradient-to-br from-green-600 to-emerald-700 rounded-full shadow-md">
+          <div className="p-4 bg-gradient-to-br from-brandPeach to-brandGold rounded-full shadow-md">
             <ShieldCheck className="text-white w-10 h-10" />
           </div>
         </div>
 
-        {/* Heading */}
-        <h1 className="text-2xl font-semibold text-[#1a2e22] mb-1">
-          Welcome to
-        </h1>
-        <h2 className="text-2xl font-bold text-[#1c3a28] mb-6">
-          Alchemy Dashboard
+        <h2 className="text-2xl font-bold text-text mb-6">
+          Welcome to Zentro Dashboard
         </h2>
 
-        {/* Tabs */}
-        <div className="flex justify-center gap-4 mb-6 border-b border-gray-200 pb-2">
+        <div className="flex justify-center gap-4 mb-6 border-b border-borderLight pb-2">
             <button
                 onClick={() => setActiveTab("sso")}
                 className={`pb-2 px-4 text-sm font-medium transition-colors ${
                     activeTab === "sso"
-                        ? "text-green-700 border-b-2 border-green-700"
-                        : "text-gray-500 hover:text-gray-700"
+                        ? "text-primary border-b-2 border-primary"
+                        : "text-textMuted hover:text-text"
                 }`}
             >
                 SSO Login
@@ -83,8 +76,8 @@ export default function Login() {
                 onClick={() => setActiveTab("email")}
                 className={`pb-2 px-4 text-sm font-medium transition-colors ${
                     activeTab === "email"
-                        ? "text-green-700 border-b-2 border-green-700"
-                        : "text-gray-500 hover:text-gray-700"
+                        ? "text-primary border-b-2 border-primary"
+                        : "text-textMuted hover:text-text"
                 }`}
             >
                 Email Login
@@ -94,14 +87,14 @@ export default function Login() {
         {/* SSO Login Form */}
         {activeTab === "sso" && (
             <div className="animate-fade-in">
-                <p className="text-sm text-gray-600 mb-6">
+                <p className="text-sm text-textMuted mb-6">
                   Sign in securely using your Microsoft account
                 </p>
 
                 <button
                   onClick={handleMicrosoftLogin}
                   disabled={loading}
-                  className="group flex items-center justify-center gap-3 w-full bg-gradient-to-r from-[#25693a] to-[#1d5330] text-white font-semibold px-6 py-3 rounded-xl shadow-md hover:shadow-lg hover:scale-[1.02] transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
+                  className="group flex items-center justify-center gap-3 w-full bg-gradient-to-r from-brandGold to-brandCoral text-white font-semibold px-6 py-3 rounded-xl shadow-md hover:shadow-lg hover:scale-[1.02] transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -121,29 +114,29 @@ export default function Login() {
         {activeTab === "email" && (
             <form onSubmit={handleEmailLogin} className="animate-fade-in text-left">
                 <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <label className="block text-sm font-medium text-text mb-1">Email</label>
                     <div className="relative">
-                        <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                        <Mail className="absolute left-3 top-3 w-5 h-5 text-textMuted" />
                         <input
                             type="email"
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-all"
+                            className="w-full pl-10 pr-4 py-2 border border-borderLight rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                             placeholder="name@company.com"
                         />
                     </div>
                 </div>
                 <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                    <label className="block text-sm font-medium text-text mb-1">Password</label>
                     <div className="relative">
-                        <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                        <Lock className="absolute left-3 top-3 w-5 h-5 text-textMuted" />
                         <input
                             type="password"
                             required
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-all"
+                            className="w-full pl-10 pr-4 py-2 border border-borderLight rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                             placeholder="••••••••"
                         />
                     </div>
@@ -152,7 +145,7 @@ export default function Login() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-[#25693a] to-[#1d5330] text-white font-semibold px-6 py-3 rounded-xl shadow-md hover:shadow-lg hover:scale-[1.02] transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                  className="w-full bg-gradient-to-r from-brandGold to-brandCoral text-white font-semibold px-6 py-3 rounded-xl shadow-md hover:shadow-lg hover:scale-[1.02] transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center gap-2"
                 >
                    {loading && <Loader2 className="w-5 h-5 animate-spin" />}
                    {loading ? "Signing in..." : "Sign in"}
@@ -160,9 +153,8 @@ export default function Login() {
             </form>
         )}
 
-        {/* Footer */}
-        <p className="text-xs text-gray-500 mt-8">
-          © {new Date().getFullYear()} Alchemy GRC — Secure Access Portal
+        <p className="text-xs text-textMuted mt-8">
+          © {new Date().getFullYear()} Zentro GRC — Secure Access Portal
         </p>
       </div>
     </div>

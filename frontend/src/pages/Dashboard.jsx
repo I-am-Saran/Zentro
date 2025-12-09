@@ -14,7 +14,7 @@ console.warn = (...args) => {
 };
 
 import { useEffect, useState, useMemo } from "react";
-import { Bug, Users as UsersIcon, TrendingUp, ShieldCheck } from "lucide-react";
+import { Bug, Users as UsersIcon, TrendingUp, ShieldCheck, CheckSquare } from "lucide-react";
 import { Card, CardBody, Typography } from "@material-tailwind/react";
 import { supabase } from "../supabaseClient";
 
@@ -55,10 +55,17 @@ export default function Dashboard() {
 
   const [userChartData, setUserChartData] = useState([]);
   const [userChartLoading, setUserChartLoading] = useState(false);
+  const [userMap, setUserMap] = useState({});
 
   // comprehensive bugs for charts
   const [allBugs, setAllBugs] = useState([]);
   const [allBugsLoading, setAllBugsLoading] = useState(false);
+  
+  // ---------------- Tasks for charts ----------------
+  const [allTasks, setAllTasks] = useState([]);
+  const [allTasksLoading, setAllTasksLoading] = useState(false);
+  const [taskStartDate, setTaskStartDate] = useState("");
+  const [taskEndDate, setTaskEndDate] = useState("");
 
   // Add state to delay chart rendering until containers are ready
   const [chartsReady, setChartsReady] = useState(false);
@@ -473,42 +480,8 @@ export default function Dashboard() {
     };
 
     const fetchPriorityCountsFromApi = async () => {
-      if (!API_BASE) return false;
-      try {
-        setPriorityLoading(true);
-        const url = `${API_BASE.replace(/\/$/, "")}/api/priority-stats`;
-        const res = await fetch(url, { signal });
-        if (!res.ok) {
-          console.warn("/api/priority-stats returned", res.status);
-          return false;
-        }
-        const json = await res.json().catch(() => null);
-        if (json && json.status === "success" && json.data) {
-          const counts = json.data;
-          setPriorityData([
-            {
-              priority: "High",
-              count: Number(counts.high || 0),
-            },
-            {
-              priority: "Medium",
-              count: Number(counts.medium || 0),
-            },
-            {
-              priority: "Low",
-              count: Number(counts.low || 0),
-            },
-          ]);
-          return true;
-        }
-        return false;
-      } catch (err) {
-        if (err?.name === "AbortError") return false;
-        console.warn("Priority API failed:", err);
-        return false;
-      } finally {
-        setPriorityLoading(false);
-      }
+      // Skip API fetch and go directly to fallback
+      return false;
     };
 
     const fetchPriorityCountsFallback = async () => {
@@ -594,16 +567,31 @@ export default function Dashboard() {
         setUserChartLoading(true);
         const { data: rows, error } = await supabase
           .from("users")
-          .select("role");
+          .select("*");
         if (error) {
           console.error("Error fetching users:", error);
           setUserChartData([]);
           return;
         }
+
+        // Build user map for ID -> Name resolution
+        const map = {};
+        (rows || []).forEach((u) => {
+          if (u.id) {
+            // prioritize full_name, then email, then split email, then id
+            let name = u.full_name;
+            if (!name && u.email) {
+              name = u.email.split('@')[0]; // fallback to email prefix
+            }
+            map[u.id] = name || u.id;
+          }
+        });
+        setUserMap(map);
+
         const freq = {};
         (rows || []).forEach((r) => {
           const name =
-            (r && (r.role ?? r.Role ?? Object.values(r)[0])) ||
+            (r && (r.role ?? r.Role ?? r.role_name)) ||
             "Unknown";
           const key = String(name).trim() || "Unknown";
           freq[key] = (freq[key] || 0) + 1;
@@ -652,9 +640,29 @@ export default function Dashboard() {
       }
     };
 
+    const fetchAllTasks = async () => {
+      try {
+        setAllTasksLoading(true);
+        const { data, error } = await supabase
+          .from("tasks")
+          .select("*")
+          .limit(2000);
+        if (error) {
+          console.error("Error fetching all tasks:", error);
+          return;
+        }
+        setAllTasks(data || []);
+      } catch (err) {
+        console.error("Error fetching all tasks:", err);
+      } finally {
+        setAllTasksLoading(false);
+      }
+    };
+
     fetchCounts();
     fetchRecentBugs();
     fetchAllBugs();
+    fetchAllTasks();
     (async () => {
       const ok = await fetchPriorityCountsFromApi();
       if (!ok) await fetchPriorityCountsFallback();
@@ -954,13 +962,18 @@ export default function Dashboard() {
       statusMap[status] = (statusMap[status] || 0) + 1;
 
       // assignee
-      const assignee =
+      const rawAssignee =
         b.Assignee ??
         b.assignee ??
         b["Assignee "] ??
         "";
-      if (assignee && String(assignee).trim() !== "") {
-        const key = String(assignee).trim();
+      if (rawAssignee && String(rawAssignee).trim() !== "") {
+        const keyRaw = String(rawAssignee).trim();
+        // map ID to name if present. check both exact match and lowercase match
+        let key = userMap[keyRaw] || userMap[keyRaw.toLowerCase()] || keyRaw;
+        
+        // If still looks like a UUID (long string with dashes), try to find partial match or leave as is
+        // but often the map lookup should have worked if the ID is correct.
         assigneeMap[key] = (assigneeMap[key] || 0) + 1;
       }
 
@@ -999,7 +1012,51 @@ export default function Dashboard() {
       .slice(0, 6); // top projects for bottom chart
 
     return { bugsByStatus, bugsByAssignee, bugsByProject };
-  }, [allBugs]);
+  }, [allBugs, userMap]);
+
+  // ---------------- Tasks derived datasets ----------------
+  const { tasksByStatus, tasksByAssignee, tasksByDate } = useMemo(() => {
+    const statusMap = {};
+    const assigneeMap = {};
+    const dateMap = {};
+
+    (allTasks || []).forEach((t) => {
+      // Date filtering
+      if (t.created_at) {
+        const date = t.created_at.slice(0, 10);
+        if (taskStartDate && date < taskStartDate) return;
+        if (taskEndDate && date > taskEndDate) return;
+        
+        dateMap[date] = (dateMap[date] || 0) + 1;
+      } else if (taskStartDate || taskEndDate) {
+        // if filtering by date but no date on task, exclude it? 
+        // usually safer to exclude if date is missing when range is active
+        return; 
+      }
+
+      // Status
+      const statusRaw = t.task_status || "todo";
+      const status = String(statusRaw).charAt(0).toUpperCase() + String(statusRaw).slice(1);
+      statusMap[status] = (statusMap[status] || 0) + 1;
+
+      // Assignee
+      const rawAssignee = t.assigned_to || "Unassigned";
+      const assignee = userMap[rawAssignee] || userMap[rawAssignee.toLowerCase()] || rawAssignee;
+      assigneeMap[assignee] = (assigneeMap[assignee] || 0) + 1;
+    });
+
+    const tasksByStatus = Object.entries(statusMap).map(([name, value]) => ({ name, value }));
+    const tasksByAssignee = Object.entries(assigneeMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+    
+    const tasksByDate = Object.entries(dateMap)
+      .map(([date, value]) => ({ date, value }))
+      .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+    return { tasksByStatus, tasksByAssignee, tasksByDate };
+  }, [allTasks, taskStartDate, taskEndDate, userMap]);
 
   // total for Bugs by Project (for bottom label)
   const bugsByProjectTotal = bugsByProject.reduce(
@@ -1022,7 +1079,7 @@ export default function Dashboard() {
           {/* Greeting */}
           <div className="mb-8 animate-fade-in">
             <h1 className="text-4xl font-black bg-gradient-to-r from-primary via-accent to-primaryLight bg-clip-text text-transparent">
-              👋 Welcome back to Nexus
+              👋 Welcome back to Zentro
             </h1>
             <p className="mt-2 text-lg text-textMuted font-medium">
               Here is your dashboard overview. Stay on top of your projects and
@@ -1060,14 +1117,169 @@ export default function Dashboard() {
               iconColor="#D97706"
             />
             <KpiCard
-              title="Security Controls"
-              value={securityAlerts}
-              Icon={ShieldCheck}
-              gradientFrom="#F8FAFC"
-              gradientTo="#EEF2F7"
+              title="Total Tasks"
+              value={allTasks ? allTasks.length : 0}
+              Icon={CheckSquare}
+              gradientFrom="#EFF6FF"
+              gradientTo="#DBEAFE"
               iconBg="#ffffffcc"
-              iconColor="#334155"
+              iconColor="#2563EB"
             />
+          </div>
+
+          {/* NEW Task Overview section */}
+          <div className="mt-4 mb-8">
+            <div className="flex flex-wrap items-center justify-between mb-4 gap-4">
+              <Typography
+                variant="h6"
+                className="font-semibold text-slate-800 flex items-center gap-2"
+              >
+                <CheckSquare size={20} className="text-primary" />
+                Task Overview
+              </Typography>
+              
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-textMuted uppercase font-bold tracking-wider mb-0.5">From</span>
+                  <input 
+                    type="date" 
+                    className="px-2 py-1 text-sm border border-borderLight rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                    value={taskStartDate}
+                    onChange={(e) => setTaskStartDate(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-textMuted uppercase font-bold tracking-wider mb-0.5">To</span>
+                  <input 
+                    type="date" 
+                    className="px-2 py-1 text-sm border border-borderLight rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                    value={taskEndDate}
+                    onChange={(e) => setTaskEndDate(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {allTasksLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-textMuted font-medium animate-pulse">
+                  Loading task overview...
+                </div>
+              </div>
+            ) : (
+              <>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                 {/* Tasks Created Per Day */}
+                 <Card className="glass-panel h-80">
+                    <CardBody className="h-full flex flex-col p-4">
+                      <Typography variant="h6" className="mb-4 font-bold text-slate-800 text-base">
+                        Tasks Created Per Day
+                      </Typography>
+                      <div className="flex-1" style={{ minHeight: '240px' }}>
+                        {tasksByDate.length === 0 ? (
+                           <div className="text-sm text-textMuted">No task data.</div>
+                        ) : (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={tasksByDate} margin={{top: 10, right: 10, left: -20, bottom: 0}}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(209,213,219,0.6)" />
+                              <XAxis dataKey="date" tick={{fontSize: 10}} />
+                              <YAxis allowDecimals={false} tick={{fontSize: 10}} />
+                              <Tooltip 
+                                formatter={(val) => [val, "Task"]}
+                                contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                              />
+                              <Bar dataKey="value" fill="#F472B6" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    </CardBody>
+                 </Card>
+
+                 {/* Tasks Assigned to Each User */}
+                 <Card className="glass-panel h-80">
+                    <CardBody className="h-full flex flex-col p-4">
+                      <Typography variant="h6" className="mb-4 font-bold text-slate-800 text-base">
+                        Tasks Assigned to Each User
+                      </Typography>
+                      <div className="flex-1" style={{ minHeight: '240px' }}>
+                        {tasksByAssignee.length === 0 ? (
+                           <div className="text-sm text-textMuted">No assignee data.</div>
+                        ) : (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={tasksByAssignee} margin={{top: 10, right: 10, left: -20, bottom: 0}}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(209,213,219,0.6)" />
+                              <XAxis dataKey="name" tick={{fontSize: 10}} interval={0} angle={-20} textAnchor="end" height={50} />
+                              <YAxis allowDecimals={false} tick={{fontSize: 10}} />
+                              <Tooltip 
+                                formatter={(val) => [val, "Task"]}
+                                contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                              />
+                              <Bar dataKey="value" fill="#2DD4BF" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    </CardBody>
+                 </Card>
+              </div>
+
+              <div className="mt-6">
+                 {/* Tasks by Status */}
+                 <Card className="glass-panel h-80">
+                    <CardBody className="h-full flex flex-col p-4">
+                      <Typography variant="h6" className="mb-4 font-bold text-slate-800 text-base">
+                        Tasks by Status
+                      </Typography>
+                      <div className="flex-1" style={{ minHeight: '240px' }}>
+                         {tasksByStatus.length === 0 ? (
+                           <div className="text-sm text-textMuted">No status data.</div>
+                         ) : (
+                           <ResponsiveContainer width="100%" height="100%">
+                            <PieChart margin={{ top: 20, bottom: 20 }}>
+                              <Pie
+                                data={tasksByStatus}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={50}
+                                outerRadius={70}
+                                paddingAngle={2}
+                                label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                                labelLine={true}
+                              >
+                                 {tasksByStatus.map((entry, index) => {
+                                   const name = entry.name.toLowerCase();
+                                   let color = donutColors[index % donutColors.length];
+                                   if (name.includes('todo') || name.includes('open')) color = '#FF6384'; // Red
+                                   else if (name.includes('progress')) color = '#FFCE56'; // Yellow
+                                   else if (name.includes('done') || name.includes('complete')) color = '#4BC0C0'; // Green
+                                   return <Cell key={`cell-${index}`} fill={color} />;
+                                 })}
+                               </Pie>
+                               <Tooltip 
+                                formatter={(val) => [val, "Task"]}
+                                contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                              />
+                               <Legend 
+                                 verticalAlign="bottom" 
+                                 height={36} 
+                                 formatter={(value, entry) => {
+                                   const item = tasksByStatus.find(t => t.name === value);
+                                   const percent = item ? ((item.value / tasksByStatus.reduce((a,b)=>a+b.value,0)) * 100).toFixed(0) : 0;
+                                   return <span style={{ color: '#333', fontWeight: 500, marginLeft: 5 }}>{value}</span>;
+                                 }}
+                               />
+                             </PieChart>
+                           </ResponsiveContainer>
+                         )}
+                      </div>
+                    </CardBody>
+                 </Card>
+              </div>
+              </>
+            )}
           </div>
 
           {/* NEW Bug overview section: 3 charts like screenshot */}
@@ -1728,20 +1940,20 @@ export default function Dashboard() {
                       ) : ttApplicationTypeDistribution.length === 0 ? (
                         <div className="text-sm text-textMuted">No data</div>
                       ) : (
-                        <ResponsiveContainer width="100%" height={180} key="tt-app-type">
-                          <PieChart>
-                            <Pie
-                              data={ttApplicationTypeDistribution}
-                              dataKey="value"
-                              nameKey="name"
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={70}
-                              labelLine={false}
-                              label={({ name, percent }) =>
-                                `${name} ${(percent * 100).toFixed(0)}%`
-                              }
-                            >
+                        <ResponsiveContainer width="100%" height={220} key="tt-app-type">
+                            <PieChart margin={{ top: 30, bottom: 30, left: 20, right: 20 }}>
+                              <Pie
+                                data={ttApplicationTypeDistribution}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                outerRadius={50}
+                                labelLine={true}
+                                label={({ name, percent }) =>
+                                  `${name} ${(percent * 100).toFixed(0)}%`
+                                }
+                              >
                               {ttApplicationTypeDistribution.map(
                                 (entry, idx) => (
                                   <Cell

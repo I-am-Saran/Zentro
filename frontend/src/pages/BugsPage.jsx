@@ -45,8 +45,6 @@ const normalizeBug = (row) => {
           {
             text: String(rawCommentData),
             user:
-              row?.["Reporter"] ??
-              row?.reporter ??
               row?.["Assignee"] ??
               row?.assignee ??
               "Unknown User",
@@ -60,8 +58,6 @@ const normalizeBug = (row) => {
         {
           text: String(rawCommentData),
           user:
-            row?.["Reporter"] ??
-            row?.reporter ??
             row?.["Assignee"] ??
             row?.assignee ??
             "Unknown User",
@@ -124,7 +120,6 @@ const normalizeBug = (row) => {
     Component: row?.["Component"] ?? row?.component ?? "",
     "Defect type": row?.["Defect type"] ?? row?.defect_type ?? "",
     "Steps to Reproduce": row?.["Steps to Reproduce"] ?? row?.steps_to_reproduce ?? "",
-    Reporter: row?.["Reporter"] ?? row?.reporter ?? "",
     Resolution: row?.["Resolution"] ?? row?.resolution ?? "",
     "Sprint details": row?.["Sprint details"] ?? row?.sprint_details ?? "",
     "Automation Intent": row?.["Automation Intent"] ?? row?.automation_intent ?? "",
@@ -663,7 +658,6 @@ export default function BugsPage() {
 
     const currentUserName =
       getCurrentUserName() ||
-      form["Reporter"] ||
       form["Assignee"] ||
       "Unknown User";
 
@@ -804,7 +798,6 @@ export default function BugsPage() {
         text: commentText,
         user:
           getCurrentUserName() ||
-          form["Reporter"] ||
           form["Assignee"] ||
           "Unknown User",
         timestamp: new Date().toISOString(),
