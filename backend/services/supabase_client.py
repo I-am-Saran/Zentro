@@ -3,32 +3,31 @@ from typing import Optional
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
-# Load environment variables from .env file in the backend directory
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise Exception("Missing SUPABASE_URL or SUPABASE_KEY environment variables. Check your .env file.")
+class MissingSupabaseClient:
+    def __getattr__(self, _):
+        raise Exception("Supabase is not configured. Set SUPABASE_URL and SUPABASE_KEY environment variables.")
 
-# Regular client for normal operations
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Admin client for admin operations (invitations, user management)
+supabase: Client | MissingSupabaseClient
 supabase_admin: Optional[Client] = None
-if SUPABASE_SERVICE_ROLE_KEY:
-    # Create admin client with service role key
-    supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    if SUPABASE_SERVICE_ROLE_KEY:
+        supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+else:
+    supabase = MissingSupabaseClient()
+    supabase_admin = None
 
 def verify_supabase_token(authorization_header: Optional[str] = None):
-    """Lightweight token verification helper for Supabase auth.
-
-    Returns a dict with user info if a valid session exists; otherwise None.
-    """
     try:
+        if isinstance(supabase, MissingSupabaseClient):
+            return None
         if authorization_header and authorization_header.lower().startswith("bearer "):
             _token = authorization_header.split(" ", 1)[1].strip()
         session = supabase.auth.get_session()
