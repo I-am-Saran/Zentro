@@ -19,6 +19,7 @@
     "react-data-table-component": "^7.7.0",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.1",
+    "recharts": "^3.5.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
