@@ -36,7 +36,11 @@ import {
 } from "recharts";
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE || "";
+  (import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_API_BASE ||
+    import.meta.env.VITE_PUBLIC_API_BASE_URL ||
+    import.meta.env.VITE_PUBLIC_API_BASE ||
+    "https://nexus-z97n.onrender.com");
 
 export default function Dashboard() {
   // ---------------- high-level dashboard states ---------------

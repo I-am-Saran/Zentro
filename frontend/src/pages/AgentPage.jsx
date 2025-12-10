@@ -6,6 +6,7 @@ import {
     CpuChipIcon
 } from "@heroicons/react/24/solid";
 import { Typography, Card, Input, Button } from "@material-tailwind/react";
+import { API_BASE } from "../services/api";
 
 export default function AgentPage() {
     const [messages, setMessages] = useState([
@@ -34,7 +35,8 @@ export default function AgentPage() {
 
         try {
             // Call backend agent endpoint
-            const response = await fetch("http://127.0.0.1:8000/api/agent/chat", {
+            const url = `${API_BASE.replace(/\/$/, "")}/api/agent/chat`;
+            const response = await fetch(url, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

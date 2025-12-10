@@ -1,4 +1,12 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+// Resolve API base from multiple env keys, fallback to Render URL
+const env = import.meta.env || {};
+const BASE_URL_RAW =
+  env.VITE_API_BASE_URL ||
+  env.VITE_API_BASE ||
+  env.VITE_PUBLIC_API_BASE_URL ||
+  env.VITE_PUBLIC_API_BASE ||
+  "https://nexus-z97n.onrender.com";
+const BASE_URL = String(BASE_URL_RAW).replace(/\/$/, "");
 
 async function request(path, options = {}) {
   // If BASE_URL is not set, we assume relative path (proxy in dev, same origin in prod)
@@ -41,4 +49,7 @@ export async function put(path, data) {
 export async function del(path) {
   return request(path, { method: "DELETE" });
 }
+
+// Export the resolved base for reuse in ad-hoc fetches
+export const API_BASE = BASE_URL;
 
