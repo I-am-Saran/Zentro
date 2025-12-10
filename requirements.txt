@@ -6,3 +6,4 @@ pyjwt
 passlib[bcrypt]
 bcrypt
 requests
+python-multipart
