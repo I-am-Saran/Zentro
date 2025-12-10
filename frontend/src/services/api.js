@@ -1,12 +1,24 @@
 // Resolve API base from multiple env keys, fallback to Render URL
 const env = import.meta.env || {};
-const BASE_URL_RAW =
+let BASE_URL =
   env.VITE_API_BASE_URL ||
   env.VITE_API_BASE ||
   env.VITE_PUBLIC_API_BASE_URL ||
   env.VITE_PUBLIC_API_BASE ||
   "https://nexus-z97n.onrender.com";
-const BASE_URL = String(BASE_URL_RAW).replace(/\/$/, "");
+
+// If a local host base is set but we are running on a non-localhost origin, override to Render URL
+try {
+  const originHost = typeof window !== "undefined" ? window.location.hostname : "";
+  const isProdHost = originHost && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(originHost);
+  const isLocalBase = /localhost|127\.0\.0\.1|\[::1\]/.test(String(BASE_URL));
+  if (isProdHost && isLocalBase) {
+    BASE_URL = "https://nexus-z97n.onrender.com";
+  }
+} catch { void 0; }
+
+
+BASE_URL = String(BASE_URL).replace(/\/$/, "");
 
 async function request(path, options = {}) {
   // If BASE_URL is not set, we assume relative path (proxy in dev, same origin in prod)

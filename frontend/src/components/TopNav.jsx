@@ -10,9 +10,11 @@ import {
   LayoutDashboard,
   Key,
   Sparkles as SparklesIcon,
+  Wrench,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+const LOGO_URL = import.meta.env.VITE_LOGO_URL || "";
 
 export default function TopNav({ open, onClose }) {
   const navigate = useNavigate();
@@ -60,17 +62,22 @@ export default function TopNav({ open, onClose }) {
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 w-64 bg-gradient-to-b from-primary via-primary to-primaryDark text-white shadow-2xl transform transition-transform duration-300 z-30 flex flex-col justify-between ${open ? "translate-x-0" : "-translate-x-full sm:translate-x-0"
+      className={`fixed inset-y-0 left-0 w-64 bg-gradient-to-b from-primary via-primary to-primaryDark text-white shadow-2xl transform transition-transform duration-300 z-30 flex flex-col justify-between overflow-y-auto sidebar-scroll-hidden ${open ? "translate-x-0" : "-translate-x-full sm:translate-x-0"
         }`}
     >
       {/* Top section */}
       <div>
         {/* Header with logo */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-gradient-to-r from-primary to-primaryLight">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-gradient-to-r from-primary to-primaryLight sticky top-0 z-20">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-accent to-accentLight flex items-center justify-center shadow-lg">
-              <span className="text-lg font-bold text-white">⚗️</span>
-            </div>
+            {LOGO_URL ? (
+              <img src={LOGO_URL} alt="Logo" className="w-10 h-10 rounded-lg shadow-lg object-cover" />
+            ) : (
+              <div className="relative w-10 h-10 rounded-lg bg-yellow-400 flex items-center justify-center shadow-lg">
+                <Bug className="absolute left-1.5 top-1.5 w-7 h-7 text-red-500" />
+                <Wrench className="absolute right-1.5 bottom-1.5 w-7 h-7 text-yellow-600 rotate-12" />
+              </div>
+            )}
             <Typography variant="h6" className="font-bold text-white">
               Zentro
             </Typography>
@@ -130,7 +137,7 @@ export default function TopNav({ open, onClose }) {
       </div>
 
       {/* Bottom logout section */}
-      <div className="border-t border-white/10 px-3 py-4 bg-gradient-to-t from-primaryDark/50 to-transparent">
+      <div className="border-t border-white/10 px-3 py-4 bg-gradient-to-t from-primaryDark/50 to-transparent sticky bottom-0 z-20">
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 w-full px-4 py-3 rounded-lg bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white text-sm font-semibold transition-all duration-200 shadow-lg hover:shadow-xl hover:shadow-red-600/30 active:scale-95"

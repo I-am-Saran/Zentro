@@ -1,5 +1,5 @@
 // src/pages/UsersPage.jsx
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardBody, Typography, Button, Chip, IconButton, Tooltip } from "@material-tailwind/react";
 import { 
   MagnifyingGlassIcon, 
@@ -20,12 +20,11 @@ import GlossyButton from "../components/GlossyButton";
 import Toast from "../components/Toast";
 import Modal from "../components/Modal";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { post, get } from "../services/api";
-import { useNavigate } from "react-router-dom";
+import { post, get, del as delReq } from "../services/api";
+// removed unused navigate
 import BackButton from "../components/BackButton";
 
 export default function UsersPage() {
-  const navigate = useNavigate();
 
   // ============================
   // View Modes
@@ -51,14 +50,14 @@ export default function UsersPage() {
     accountType: ""
   });
   const [showFilters, setShowFilters] = useState(false);
-  const [sortBy, setSortBy] = useState("created_at");
-  const [sortOrder, setSortOrder] = useState("desc");
+  const [sortBy] = useState("created_at");
+  const [sortOrder] = useState("desc");
 
   // ============================
   // Pagination
   // ============================
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [totalUsers, setTotalUsers] = useState(0);
 
@@ -313,22 +312,10 @@ export default function UsersPage() {
     if (!selectedUser) return;
 
     try {
-      const response = await fetch(`http://localhost:8000/api/users/${selectedUser.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === "success") {
-          setToast({ type: "success", message: "User deleted successfully" });
-          fetchUsers();
-        }
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Failed to delete user");
+      const response = await delReq(`/api/users/${selectedUser.id}`);
+      if (response && response.status === "success") {
+        setToast({ type: "success", message: "User deleted successfully" });
+        fetchUsers();
       }
     } catch (error) {
       setToast({ type: "error", message: error.message || "Failed to delete user" });
@@ -525,7 +512,7 @@ export default function UsersPage() {
   const renderUsersTable = () => {
     if (loading) {
       return (
-        <Card>
+        <Card className="glass-panel">
           <CardBody className="flex justify-center items-center h-64">
             <LoadingSpinner />
           </CardBody>
@@ -534,24 +521,24 @@ export default function UsersPage() {
     }
 
     return (
-      <Card className="shadow-sm">
+      <Card className="glass-panel overflow-hidden">
         <CardBody className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gradient-to-r from-primary/95 to-primaryLight/95 text-white">
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">User</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">Department</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">Account</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">Phone</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-white">Actions</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody>
                 {users.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50">
+                  <tr key={user.id} className="border-b border-borderLight/60 odd:bg-white even:bg-[#F8FBFA] hover:bg-accent/10 transition-all duration-200">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10">
@@ -653,7 +640,7 @@ export default function UsersPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="px-6 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+            <div className="px-6 py-3 bg-white border-t border-borderLight flex items-center justify-between">
               <div className="flex items-center">
                 <span className="text-sm text-gray-700">
                   Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalUsers)} of {totalUsers} results
@@ -678,7 +665,7 @@ export default function UsersPage() {
                       variant={currentPage === pageNum ? "filled" : "text"}
                       size="sm"
                       onClick={() => setCurrentPage(pageNum)}
-                      className={currentPage === pageNum ? "bg-blue-600 text-white" : "text-gray-600"}
+                      className={currentPage === pageNum ? "bg-primary text-white" : "text-gray-600"}
                     >
                       {pageNum}
                     </Button>
@@ -1020,7 +1007,7 @@ export default function UsersPage() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <BackButton />
-                <Typography variant="h4" className="text-gray-900">User Management</Typography>
+                <Typography variant="h4" className="text-2xl font-black bg-gradient-to-r from-primary via-accent to-primaryLight bg-clip-text text-transparent">User Management</Typography>
               </div>
               <div className="flex items-center gap-3">
                 <Button

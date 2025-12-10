@@ -1070,7 +1070,7 @@ export default function Dashboard() {
 
   // ---------------- render ----------------
   return (
-    <div className="min-h-screen relative bg-gradient-to-br from-white via-backgroundAlt to-cardDark overflow-hidden">
+    <div className="min-h-screen relative bg-gradient-to-br from-white via-backgroundAlt to-cardDark overflow-y-auto">
       {/* Background decorative blobs */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
         <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-accent/8 blur-3xl" />

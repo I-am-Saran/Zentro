@@ -433,6 +433,16 @@ table tbody tr:hover {
   background: #00B88A;
 }
 
+.sidebar-scroll-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sidebar-scroll-hidden::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+  background: transparent;
+}
+
 /* =========================
    Selection Styling
    ========================= */

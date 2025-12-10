@@ -90,41 +90,26 @@ export default function ListPageWrapper({
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-full px-6 py-6">
-        {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {showBackButton ? <BackButton /> : null}
-            <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
+            <h1 className="text-2xl font-black bg-gradient-to-r from-primary via-accent to-primaryLight bg-clip-text text-transparent">{title}</h1>
           </div>
-          <Button
-            variant="primary"
-            size="md"
-            onClick={onCreateClick}
-            ariaLabel={`Create ${title}`}
-          >
-            + Create
-          </Button>
+          <GlossyButton onClick={onCreateClick} aria-label={`Create ${title}`}>+ Create</GlossyButton>
         </div>
 
-        {/* Export buttons (if provided) */}
         {Object.keys(exportFunctions).length > 0 && (
           <div className="flex justify-end gap-2 mb-3">
             {exportFunctions.csv && (
-              <GlossyButton size="sm" variant="outlined" onClick={exportFunctions.csv}>
-                Export CSV
-              </GlossyButton>
+              <GlossyButton size="sm" variant="outlined" onClick={exportFunctions.csv}>Export CSV</GlossyButton>
             )}
             {exportFunctions.excel && (
-              <GlossyButton size="sm" onClick={exportFunctions.excel}>
-                Export Excel
-              </GlossyButton>
+              <GlossyButton size="sm" onClick={exportFunctions.excel}>Export Excel</GlossyButton>
             )}
           </div>
         )}
 
-        {/* Controls: search, filter, sort */}
-        <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Search */}
+        <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 glass-panel sticky top-0 z-10 p-3">
           <input
             aria-label="Search"
             value={q}
@@ -133,27 +118,21 @@ export default function ListPageWrapper({
             className="w-full rounded-xl bg-white border border-neutral-300 px-3 py-2 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
           />
 
-          {/* Custom filters */}
           {filters.map((f) => (
             <select
               key={f.key}
               aria-label={`Filter by ${f.label}`}
               value={filterValues[f.key] || ""}
-              onChange={(e) =>
-                setFilterValues((prev) => ({ ...prev, [f.key]: e.target.value }))
-              }
+              onChange={(e) => setFilterValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
               className="w-full rounded-xl bg-white border border-neutral-300 px-3 py-2 text-gray-800"
             >
               <option value="">All {f.label}</option>
               {f.options.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           ))}
 
-          {/* Sort */}
           <div className="flex gap-2">
             <select
               aria-label="Sort by"
@@ -177,26 +156,21 @@ export default function ListPageWrapper({
           </div>
         </div>
 
-        {/* Table */}
         <div className="overflow-x-auto rounded-xl border border-neutral-200 glass-panel">
           <table className="min-w-full text-sm text-gray-800">
             <thead>
-              <tr className="border-b border-neutral-200 bg-neutral-50">
+              <tr className="border-b border-neutral-200 bg-primary/10">
                 {columns.map((col) => (
-                  <th key={col.key} className="px-3 py-2 text-left">
-                    {col.label}
-                  </th>
+                  <th key={col.key} className="px-3 py-2 text-left text-primary font-semibold">{col.label}</th>
                 ))}
-                <th className="px-3 py-2 text-left">Actions</th>
+                <th className="px-3 py-2 text-left text-primary font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((item) => (
-                <tr key={item.id} className="border-b border-neutral-200 hover:bg-neutral-50">
+                <tr key={item.id} className="border-b border-neutral-200 odd:bg-white even:bg-[#F8FBFA] hover:bg-accent/10">
                   {columns.map((col) => (
-                    <td key={col.key} className="px-3 py-2 truncate max-w-xs">
-                      {col.render ? col.render(item) : item[col.key]}
-                    </td>
+                    <td key={col.key} className="px-3 py-2 truncate max-w-xs">{col.render ? col.render(item) : item[col.key]}</td>
                   ))}
                   <td className="px-3 py-2 whitespace-nowrap">
                     {typeof renderActions === "function" ? (
@@ -204,29 +178,13 @@ export default function ListPageWrapper({
                     ) : (
                       <div className="flex items-center gap-2">
                         {onViewClick && (
-                          <GlossyButton
-                            size="sm"
-                            variant="outlined"
-                            className="bg-white"
-                            onClick={() => onViewClick(item)}
-                          >
-                            View
-                          </GlossyButton>
+                          <GlossyButton size="sm" variant="outlined" className="bg-white" onClick={() => onViewClick(item)}>View</GlossyButton>
                         )}
                         {onEditClick && (
-                          <GlossyButton size="sm" onClick={() => onEditClick(item)}>
-                            Edit
-                          </GlossyButton>
+                          <GlossyButton size="sm" onClick={() => onEditClick(item)}>Edit</GlossyButton>
                         )}
                         {onDeleteClick && (
-                          <GlossyButton
-                            size="sm"
-                            variant="text"
-                            className="text-red-600 hover:text-red-700"
-                            onClick={() => onDeleteClick(item)}
-                          >
-                            Delete
-                          </GlossyButton>
+                          <GlossyButton size="sm" variant="text" className="text-red-600 hover:text-red-700" onClick={() => onDeleteClick(item)}>Delete</GlossyButton>
                         )}
                       </div>
                     )}
@@ -235,12 +193,7 @@ export default function ListPageWrapper({
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td
-                    className="px-3 py-6 text-center text-gray-600"
-                    colSpan={columns.length + 1}
-                  >
-                    No items found
-                  </td>
+                  <td className="px-3 py-6 text-center text-gray-600" colSpan={columns.length + 1}>No items found</td>
                 </tr>
               )}
             </tbody>

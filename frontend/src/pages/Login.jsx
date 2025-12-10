@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { supabase } from "../supabaseClient";
-import { ShieldCheck, Mail, Lock, Loader2 } from "lucide-react";
+const LOGO_URL = import.meta.env.VITE_LOGO_URL || "";
+import { ShieldCheck, Mail, Lock, Loader2, Bug, Wrench } from "lucide-react";
 import { post } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -52,13 +53,18 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brandPeach via-brandCoral to-backgroundAlt">
       <div className="w-[90%] max-w-md bg-white/95 backdrop-blur-md border border-borderLight rounded-2xl shadow-[0_12px_40px_rgba(219,176,107,0.25)] p-8 text-center">
         <div className="flex justify-center mb-5">
-          <div className="p-4 bg-gradient-to-br from-brandPeach to-brandGold rounded-full shadow-md">
-            <ShieldCheck className="text-white w-10 h-10" />
-          </div>
+          {LOGO_URL ? (
+            <img src={LOGO_URL} alt="Logo" className="w-16 h-16 rounded-xl shadow-md object-cover" />
+          ) : (
+            <div className="relative w-16 h-16 rounded-xl bg-yellow-400 shadow-md">
+              <Bug className="absolute left-2 top-2 w-10 h-10 text-red-500" />
+              <Wrench className="absolute right-2 bottom-2 w-10 h-10 text-yellow-600 rotate-12" />
+            </div>
+          )}
         </div>
 
         <h2 className="text-2xl font-bold text-text mb-6">
-          Welcome to Zentro Dashboard
+          Welcome to Zentro 
         </h2>
 
         <div className="flex justify-center gap-4 mb-6 border-b border-borderLight pb-2">
