@@ -1130,6 +1130,608 @@ async def get_bugs():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ---------- AGENT CHAT ENDPOINT (MOCK) ----------
+# ---------- AGENT CHAT ENDPOINT (MOCK) ----------
+@app.post("/api/agent/chat")
+async def agent_chat(request: Request):
+    """
+    Simple endpoint to handle agent chat messages.
+    Processes natural language commands to interact with the bug tracker.
+    """
+    try:
+        # 1. Authenticate User
+        auth_header = request.headers.get("Authorization")
+        user_info = verify_supabase_token(auth_header)
+        current_user_email = ""
+        current_user_name = ""
+
+        if user_info and "user" in user_info:
+             current_user_email = (user_info["user"].get("email") or "").lower()
+             # Try to get full name from users table
+             user_id = user_info["user"].get("id")
+             if user_id:
+                 try:
+                     u_resp = supabase.table("users").select("full_name").eq("id", user_id).single().execute()
+                     if u_resp.data:
+                         current_user_name = (u_resp.data.get("full_name") or "").lower()
+                 except:
+                     pass
+
+        payload = await request.json()
+        message = (payload.get("message") or "").lower().strip()
+        
+        reply = ""
+        
+        # Check for "assigned to me"
+        is_assigned_query = ("assigned" in message and "me" in message) or ("my" in message and ("bugs" in message or "tasks" in message))
+        
+        if is_assigned_query:
+            if not current_user_email:
+                 reply = "I cannot identify you. Please login to see your assigned items."
+            else:
+                 # Fetch Bugs
+                 bug_result = _select_bugs_with_fallback()
+                 all_bugs = bug_result.get("data", [])
+                 
+                 # Fetch Tasks
+                 try:
+                     task_resp = supabase.table("tasks").select("*").execute()
+                     all_tasks = getattr(task_resp, "data", []) or []
+                 except:
+                     all_tasks = []
+
+                 my_items = []
+                 # Filter Bugs
+                 for b in all_bugs:
+                     assignee = (b.get("Assignee") or "").lower()
+                     assignee_real = (b.get("Assignee Real Name") or "").lower()
+                     if current_user_email in assignee or (current_user_name and current_user_name in assignee_real) or (current_user_name and current_user_name in assignee):
+                         my_items.append(f"🐛 {b.get('Bug ID')}: {b.get('Summary')} ({b.get('Status')})")
+                 
+                 # Filter Tasks
+                 for t in all_tasks:
+                     assigned_to = (t.get("assigned_to") or "").lower()
+                     if current_user_email in assigned_to:
+                          my_items.append(f"📋 {t.get('task_name')} ({t.get('task_status')})")
+
+                 count = len(my_items)
+                 if count == 0:
+                     reply = f"You have no items assigned to you, {current_user_name or current_user_email}."
+                 else:
+                     top_items = my_items[:10]
+                     item_list_str = "\n".join(top_items)
+                     reply = f"You have {count} items assigned to you:\n\n{item_list_str}"
+                     if count > 10:
+                         reply += f"\n\n...and {count - 10} more."
+
+        # 2. Tasks Module (Comprehensive)
+        elif "task" in message:
+            # --- CREATE TASK ---
+            if "create" in message or "add" in message or "new" in message:
+                # "Create a new task with title “Demo Task” and priority Medium"
+                # Simple parsing: assume title is after "title" or just everything after "task"
+                try:
+                    title = ""
+                    priority = "medium"
+                    
+                    # Extract priority
+                    if "high" in message: priority = "high"
+                    elif "low" in message: priority = "low"
+                    
+                    # Extract Title (quick & dirty)
+                    if "title" in message:
+                        parts = message.split("title", 1)
+                        if len(parts) > 1:
+                            title = parts[1].split("and priority")[0].strip(' "“”')
+                    else:
+                        # Fallback: take everything after "create task"
+                        for p in ["create task", "add task", "new task"]:
+                            if p in message:
+                                title = message.split(p, 1)[1].strip()
+                                break
+                    
+                    if not title:
+                         reply = "Please specify a title (e.g., 'create task title \"Fix Login\"')."
+                    else:
+                        new_id = str(uuid4())
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        # Default assigned to current user or "" (empty string)
+                        assigned_to = current_user_email or ""
+                        
+                        payload = {
+                            "id": new_id,
+                            "task_name": title,
+                            "task_status": "todo",
+                            "task_priority": priority,
+                            "assigned_to": assigned_to,
+                            "task_note": f"Created via AI Agent by {assigned_to}",
+                            "created_at": now_iso
+                        }
+                        r = supabase.table("tasks").insert(payload).execute()
+                        if getattr(r, "error", None):
+                            reply = f"Error creating task: {r.error}"
+                        else:
+                            reply = f"✅ Created task: **{title}** (Priority: {priority}, Assigned: {assigned_to})"
+                except Exception as e:
+                    reply = f"Failed to create task: {str(e)}"
+
+            # --- UPDATE TASK ---
+            elif "update" in message or "change" in message or "set" in message:
+                # "Update status of task 003 to In-Progress"
+                # "Change priority of task 010 to Medium"
+                try:
+                    # simplistic ID extraction (assuming integer-like sequence or exact title match is hard)
+                    # We'll look for "task <something>"
+                    target_id = None
+                    # Regex for "task 123" or "task 003"
+                    id_match = re.search(r"task\s+(\d+)", message)
+                    
+                    # We need to find the REAL UUID. Since user uses "Serial" (001), 
+                    # we need to fetch all tasks, sort by date (to mimic frontend serial), and find it.
+                    # This is expensive but necessary for "Task 003" semantic.
+                    if id_match:
+                        serial_idx = int(id_match.group(1))
+                        # Fetch all to find the serial
+                        all_tasks_resp = supabase.table("tasks").select("id, task_name, created_at").order("created_at", desc=False).execute() # Ascending to match serial 1..N
+                        all_tasks = getattr(all_tasks_resp, "data", []) or []
+                        
+                        # In frontend: TasksList.jsx -> uses ALL fetch then map. 
+                        # WAIT! Frontend uses `nextId` based on `rows` which come from `order("created_at", desc=True)`? 
+                        # Actually frontend code didn't strictly sort in the `get` call in `Task.jsx` (it used `get("/api/tasks")` which defaults to `desc=True` in backend).
+                        # BUT the serial logic `const serial = String(idx + 1).padStart(3, "0");` depends on the returned order.
+                        # Backend defaults `get_tasks` to `order("created_at", desc=True)`.
+                        # So, Task 001 is the NEWEST task.
+                        
+                        # Let's match backend default sort
+                        all_tasks_resp = supabase.table("tasks").select("id").order("created_at", desc=True).execute()
+                        all_tasks = getattr(all_tasks_resp, "data", []) or []
+                        
+                        if 0 < serial_idx <= len(all_tasks):
+                            target_id = all_tasks[serial_idx - 1]["id"]
+                        else:
+                            reply = f"Task {serial_idx} not found."
+                            return {"status": "success", "reply": reply}
+                            
+                    if not target_id:
+                         reply = "I couldn't identify the task ID. Try 'task 001'."
+                    else:
+                        updates = {}
+                        if "status" in message:
+                            if "todo" in message: updates["task_status"] = "todo"
+                            elif "progress" in message: updates["task_status"] = "in-progress"
+                            elif "done" in message: updates["task_status"] = "done"
+                        
+                        if "priority" in message:
+                            if "high" in message: updates["task_priority"] = "high"
+                            elif "medium" in message: updates["task_priority"] = "medium"
+                            elif "low" in message: updates["task_priority"] = "low"
+                            
+                        if not updates:
+                            reply = "What would you like to update? (status or priority)"
+                        else:
+                            supabase.table("tasks").update(updates).eq("id", target_id).execute()
+                            reply = f"✅ Updated Task {id_match.group(1)}."
+
+                except Exception as e:
+                    reply = f"Error updating task: {str(e)}"
+
+            # --- DELETE TASK ---
+            elif "delete" in message or "remove" in message:
+                try:
+                    # Same serial look up strategy
+                    id_match = re.search(r"task\s+(\d+)", message)
+                    if id_match:
+                        serial_idx = int(id_match.group(1))
+                        all_tasks_resp = supabase.table("tasks").select("id").order("created_at", desc=True).execute()
+                        all_tasks = getattr(all_tasks_resp, "data", []) or []
+                        
+                        if 0 < serial_idx <= len(all_tasks):
+                            target_id = all_tasks[serial_idx - 1]["id"]
+                            supabase.table("tasks").delete().eq("id", target_id).execute()
+                            reply = f"🗑️ Deleted Task {serial_idx}."
+                        else:
+                            reply = f"Task {serial_idx} not found."
+                    else:
+                         reply = "Which task to delete? (e.g. 'delete task 001')"
+                except Exception as e:
+                     reply = f"Error deleting: {str(e)}"
+
+            # --- EXPORT ---
+            elif "export" in message or "csv" in message:
+                 try:
+                     # "Export tasks with status Todo"
+                     query = supabase.table("tasks").select("*").order("created_at", desc=True)
+                     if "todo" in message: query = query.eq("task_status", "todo")
+                     elif "doing" in message or "progress" in message: query = query.eq("task_status", "in-progress")
+                     elif "done" in message or "completed" in message: query = query.eq("task_status", "done")
+                     
+                     resp = query.execute()
+                     data = getattr(resp, "data", []) or []
+                     
+                     if not data:
+                         reply = "No tasks found to export."
+                     else:
+                         csv_lines = ["ID,Title,Status,Priority,AssignedTo,Created"]
+                         for i, t in enumerate(data):
+                             row = f"{i+1:03d},{t.get('task_name')},{t.get('task_status')},{t.get('task_priority')},{t.get('assigned_to')},{t.get('created_at')}"
+                             csv_lines.append(row)
+                         
+                         csv_block = "\n".join(csv_lines)
+                         reply = f"Here is your CSV export:\n\n```csv\n{csv_block}\n```"
+                 except Exception as e:
+                     reply = f"Export failed: {str(e)}"
+
+            # --- ANALYTICS / CHARTS ---
+            elif "chart" in message or "graph" in message or "analytics" in message:
+                 # "Show tasks by priority in bar chart"
+                 # We will generate a text-based bar chart
+                 try:
+                     resp = supabase.table("tasks").select("task_status, task_priority, assigned_to, created_at").execute()
+                     data = getattr(resp, "data", []) or []
+                     
+                     if "priority" in message:
+                         counts = {"high": 0, "medium": 0, "low": 0}
+                         for t in data:
+                             p = (t.get("task_priority") or "medium").lower()
+                             counts[p] = counts.get(p, 0) + 1
+                         
+                         reply = "📊 **Tasks by Priority**\n"
+                         for k, v in counts.items():
+                             bar = "█" * v
+                             reply += f"\n{k.capitalize():<10} | {bar} ({v})"
+                             
+                     elif "status" in message:
+                         counts = {"todo": 0, "in-progress": 0, "done": 0}
+                         for t in data:
+                             s = (t.get("task_status") or "todo").lower()
+                             counts[s] = counts.get(s, 0) + 1
+                             
+                         reply = "📊 **Tasks by Status**\n"
+                         for k, v in counts.items():
+                             bar = "█" * v
+                             reply += f"\n{k.capitalize():<12} | {bar} ({v})"
+                             
+                     elif "user" in message or "assigned" in message:
+                         user_counts = {}
+                         for t in data:
+                             u = t.get("assigned_to") or "Unassigned"
+                             user_counts[u] = user_counts.get(u, 0) + 1
+                         
+                         reply = "📊 **Tasks by User**\n"
+                         for k, v in user_counts.items():
+                             bar = "█" * v
+                             reply += f"\n{k:<20} | {bar} ({v})"
+                             
+                     else:
+                         reply = "I can show charts for priority, status, or assignee. Try 'tasks by priority chart'."
+                 except Exception as e:
+                     reply = f"Analytics error: {str(e)}"
+
+            # --- LIST / SEARCH / COUNT ---
+            else:
+                # "Show all tasks", "List all tasks created today", "Search tasks..."
+                try:
+                    query = supabase.table("tasks").select("*").order("created_at", desc=True)
+                    
+                    # Filters
+                    if "todo" in message: query = query.eq("task_status", "todo")
+                    elif ("progress" in message and "in" in message): query = query.eq("task_status", "in-progress")
+                    elif "done" in message or "completed" in message: query = query.eq("task_status", "done")
+                    elif "overdue" in message:
+                        # Fetch all and filter in python (complex due date parsing)
+                        pass 
+                    
+                    if "high" in message: query = query.eq("task_priority", "high")
+                    elif "medium" in message: query = query.eq("task_priority", "medium")
+                    elif "low" in message: query = query.eq("task_priority", "low")
+                    
+                    # Search
+                    search_term = ""
+                    if "search" in message or "find" in message:
+                        # Extract "search tasks with title 'world'" -> simplified
+                        # Just grab "title <word>" or "keyword <word>"
+                        m_quote = re.search(r"['\"](.*?)['\"]", message)
+                        if m_quote:
+                            search_term = m_quote.group(1)
+                        else:
+                            # basic heuristic: last word or after "search"
+                            pass 
+                    
+                    # Execute
+                    resp = query.execute()
+                    requests = getattr(resp, "data", []) or []
+                    
+                    # Post-processing filters
+                    final_list = []
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    
+                    for i, t in enumerate(requests): # i is not accurate serial if filtered, but ok
+                        # Extract Meta
+                        note = t.get("task_note") or ""
+                        due_match = re.search(r"due=([^\s]+)", note)
+                        due_date = due_match.group(1) if due_match else "N/A"
+                        
+                        created_at_str = (t.get("created_at") or "")[:10]
+                        
+                        include = True
+                        
+                        # Date Filters
+                        if "today" in message and "created" in message:
+                             if created_at_str != today_str: include = False
+                        if "due today" in message:
+                             if due_date != today_str: include = False
+                             
+                        # Overdue
+                        if "overdue" in message:
+                            if due_date == "N/A" or due_date >= today_str: include = False
+                            
+                        # Search Content
+                        if search_term:
+                            if search_term.lower() not in (t.get("task_name") or "").lower() and \
+                               search_term.lower() not in note.lower():
+                                include = False
+                                
+                        if include:
+                            final_list.append(t)
+                            
+                    # Count?
+                    if "how many" in message or "count" in message:
+                        reply = f"There are {len(final_list)} tasks matching your criteria."
+                    elif not final_list:
+                        reply = "No tasks found matching your request."
+                    else:
+                        reply = f"Found {len(final_list)} tasks:\n"
+                        # Show top 5-10
+                        for t in final_list[:8]:
+                             # Use simplified serial logic or just ID
+                             # Since we don't have the global index here easily without fetching ALL,
+                             # we can just show bullet points.
+                             prio_icon = "🔴" if t.get("task_priority")=="high" else "🟡" if t.get("task_priority")=="medium" else "🟢"
+                             status = t.get("task_status")
+                             reply += f"\n{prio_icon} **{t.get('task_name')}** ({status})\n   Assigned: {t.get('assigned_to')}"
+                             
+                        if len(final_list) > 8:
+                            reply += f"\n\n...and {len(final_list) - 8} more."
+                            
+                except Exception as e:
+                     reply = f"Error listing tasks: {str(e)}"
+
+        # 3. List Bugs (Renumbered/Refined logic if needed, but keeping existing is fine)
+        elif any(x in message for x in ["list bugs", "show bugs", "all bugs", "list all bugs"]):
+             # ... existing bug logic ... 
+             # (See original code, we just need to ensure we don't duplicate or overwrite if not needed)
+             # Wait, `replace_file_content` will REPLACE the target block. 
+             # I should output the ORIGINAL code for Bugs/etc if I am encompassing them,
+             # OR I should have targeted a narrower block. 
+             # The instruction asked to "Insert... before Testing Requests", 
+             # but I am replacing the 'Assigned to me' block which is at the TOP.
+             # So I basically need to emit the entire body? 
+             # No, I can try to be smart with start/end lines.
+             
+             # `is_assigned_query` is at the top.
+             # `Testing Requests` is down below (line ~1350).
+             # There's `List Bugs` (elif) in between.
+             
+             # The tool allows editing a contiguous block. 
+             # I will edit from `if is_assigned_query:` (lines ~1158) down to `elif "testing" in message` (line ~1350).
+             # This means I need to re-state the "List Bugs", "Bug Details", "Create Bug", "Users", "TransTracker" blocks.
+             # That is a lot of code to repeat.
+             
+             # Better approach: 
+             # 1. Edit `is_assigned_query` block separately.
+             # 2. Insert `Tasks` block before `Testing Requests`.
+             
+             # Let's do 1 first.
+             pass
+
+        # ... (rest of the file)
+        elif any(x in message for x in ["list bugs", "show bugs", "all bugs", "list all bugs"]):
+             result = _select_bugs_with_fallback()
+             data = result.get("data", [])
+             if not data:
+                 reply = "There are no bugs in the system currently."
+             else:
+                 # Show top 5 recent bugs
+                 params = data[:5]
+                 reply = f"Here are the {min(len(data), 5)} most recent bugs:\n"
+                 for b in params:
+                     status = b.get('Status') or "Unknown"
+                     summary = b.get('Summary') or "No Summary"
+                     bid = b.get('Bug ID') or "?"
+                     reply += f"\n• {bid}: {summary} ({status})"
+                 
+                 if len(data) > 5:
+                     reply += f"\n\n...and {len(data) - 5} more."
+        
+        # 3. Bug Details
+        # Matched if user asks for details OR just provides a Bug ID (e.g. "BUG-001")
+        elif ("details" in message) or ("show" in message and "bug" in message) or re.search(r"\bbug-\d+\b", message):
+            # Extract ID usually looking for BUG-XXX or just XXX
+            match = re.search(r"(bug-\d+|\d{3,})", message)
+            if match:
+                bug_id = match.group(1).upper() # Ensure uppercase for DB (BUG-133)
+                bug = _get_bug_by_id(bug_id)
+                if bug:
+                     reply = f"Details for {bug_id}:\n"
+                     reply += f"Summary: {bug.get('Summary')}\n"
+                     reply += f"Status: {bug.get('Status')}\n"
+                     reply += f"Priority: {bug.get('Priority')}\n"
+                     reply += f"Assignee: {bug.get('Assignee') or 'Unassigned'}\n"
+                     desc = bug.get('Description') or 'No description provided.'
+                     if len(desc) > 200:
+                         desc = desc[:197] + "..."
+                     reply += f"Description: {desc}"
+                else:
+                    reply = f"I could not find any bug with ID {bug_id}."
+            else:
+                 reply = "Please specify a bug ID (e.g., 'show bug BUG-001')."
+
+        # 4. Create Bug (Simple)
+        elif "create bug" in message or "new bug" in message or "report bug" in message:
+             # Try to extract summary
+             prefix_list = ["create bug", "new bug", "report bug"]
+             summary = ""
+             for p in prefix_list:
+                 if p in message:
+                     parts = message.split(p, 1)
+                     if len(parts) > 1:
+                        summary = parts[1].strip()
+                     break
+             
+             if summary:
+                 import random
+                 new_id = f"BUG-{random.randint(1000, 9999)}"
+                 
+                 payload_new = {
+                     "Bug ID": new_id,
+                     "Summary": summary,
+                     "Description": f"Created via AI Agent from message: {summary}",
+                     "Priority": "Medium",
+                     "Status": "OPEN"
+                 }
+                 try:
+                     _insert_bug_with_fallback(payload_new)
+                     reply = f"I've created a new bug for you:\n\nID: {new_id}\nSummary: {summary}"
+                 except Exception as e:
+                    reply = f"Failed to create bug: {str(e)}"
+             else:
+                 reply = "What is the summary of the bug? (e.g., 'create bug login page error')"
+                 
+        # 5. Users Module
+        elif "user" in message:
+            if any(x in message for x in ["list", "show all", "get all"]):
+                # List Users
+                try:
+                    resp = supabase.table("users").select("full_name, email, role, is_active").limit(5).execute()
+                    users = getattr(resp, "data", []) or []
+                    if not users:
+                        reply = "No users found in the system."
+                    else:
+                        reply = f"Here are some registered users:\n"
+                        for u in users:
+                             status_icon = "🟢" if u.get("is_active") else "🔴"
+                             reply += f"\n{status_icon} {u.get('full_name')} ({u.get('role')}) - {u.get('email')}"
+                        
+                        # Get total count
+                        count_resp = supabase.table("users").select("id", count="exact").execute()
+                        total = getattr(count_resp, "count", 0) or len(users)
+                        if total > 5:
+                            reply += f"\n\n...and {total - 5} more."
+                except Exception as e:
+                    reply = f"Error fetching users: {str(e)}"
+
+            elif any(x in message for x in ["find", "search", "who is", "details of"]):
+                # Search User
+                # Extract search term: "find user John", "who is support"
+                search_term = ""
+                for prefix in ["find user", "search user", "who is", "details of"]:
+                    if prefix in message:
+                        parts = message.split(prefix, 1)
+                        if len(parts) > 1:
+                             search_term = parts[1].strip()
+                        break
+                
+                if not search_term:
+                     reply = "Who are you looking for? (e.g., 'find user john')"
+                else:
+                    try:
+                        resp = supabase.table("users").select("*").or_(f"full_name.ilike.%{search_term}%,email.ilike.%{search_term}%").limit(3).execute()
+                        users = getattr(resp, "data", []) or []
+                        if not users:
+                            reply = f"I couldn't find any user matching '{search_term}'."
+                        else:
+                            reply = f"Found {len(users)} match(es):\n"
+                            for u in users:
+                                status = "Active" if u.get("is_active") else "Inactive"
+                                reply += f"\n👤 **{u.get('full_name')}** ({u.get('role')})\n"
+                                reply += f"   Email: {u.get('email')}\n"
+                                reply += f"   Department: {u.get('department') or 'N/A'}\n"
+                                reply += f"   Status: {status}\n"
+                    except Exception as e:
+                        reply = f"Error searching users: {str(e)}"
+            else:
+                 reply = "You can ask me to 'list users' or 'find user <name>'."
+
+        # 6. TransTracker Module
+        elif "tracker" in message or "release" in message or "build" in message:
+             if any(x in message for x in ["list", "show", "recent"]):
+                 try:
+                     # Fetch recent releases
+                     resp = supabase.table("transtrackers").select("applicationtype, buildnumber, buildreceiveddate, signoffstatus").order("buildreceiveddate", desc=True).limit(5).execute()
+                     releases = getattr(resp, "data", []) or []
+                     
+                     if not releases:
+                         reply = "No TransTracker records found."
+                     else:
+                         reply = "Here are the most recent releases/builds:\n"
+                         for r in releases:
+                             date = r.get('buildreceiveddate') or "N/A"
+                             app = r.get('applicationtype') or "App"
+                             build = r.get('buildnumber') or "?"
+                             status = r.get('signoffstatus') or "Pending"
+                             
+                             icon = "✅" if "approved" in status.lower() else "⚠️"
+                             reply += f"\n{icon} **{app}** (Build {build})\n   Date: {date} | Status: {status}"
+                 except Exception as e:
+                      reply = f"Error fetching TransTracker data: {str(e)}"
+             else:
+                  reply = "I can help you list recent releases. Try 'show recent releases' or 'list transtracker'."
+
+        # 7. Testing Requests Module
+        elif "testing" in message and "request" in message:
+             if any(x in message for x in ["list", "show", "recent"]):
+                 try:
+                     resp = supabase.table("testing_requests").select("product_project_name, build_version, sprint, created_at").order("created_at", desc=True).limit(5).execute()
+                     requests = getattr(resp, "data", []) or []
+                     
+                     if not requests:
+                         reply = "No testing requests found."
+                     else:
+                         reply = "Here are the most recent testing requests:\n"
+                         for r in requests:
+                             proj = r.get("product_project_name") or "Unknown Project"
+                             build = r.get("build_version") or "N/A"
+                             sprint = r.get("sprint") or "N/A"
+                             date_str = r.get("created_at") or ""
+                             date_only = date_str.split("T")[0] if "T" in date_str else date_str 
+                             
+                             reply += f"\n📄 **{proj}**\n   Build: {build} | Sprint: {sprint} | Date: {date_only}"
+                 except Exception as e:
+                     reply = f"Error fetching testing requests: {str(e)}"
+             else:
+                  reply = "I can list recent testing requests. Try 'list testing requests'."
+
+        # 8. Status/Count
+        elif "count" in message or "how many" in message:
+             # Basic bug count
+             result = _select_bugs_with_fallback()
+             count = len(result.get("data", []))
+             reply = f"There are currently {count} bugs in the system."
+
+        # 9. Help / Greeting
+        elif any(x in message for x in ["hi", "hello", "help", "hey"]):
+            reply = "Hello! I am your Intelligent Project Assistant. I can help with:\n\n"
+            reply += "🐛 **Bugs**\n• 'List bugs', 'Show details for BUG-101'\n• 'How many bugs?'\n\n"
+            reply += "📋 **Tasks**\n• 'List tasks', 'Create task <title>'\n• 'Update task 123', 'Delete task 123'\n• 'Tasks by priority chart', 'Export tasks'\n\n"
+            reply += "👥 **Users**\n• 'List all users', 'Find user <name>'\n\n"
+            reply += "🚀 **TransTracker**\n• 'Show recent releases'\n\n"
+            reply += "📄 **Testing Requests**\n• 'List testing requests'"
+            
+        else:
+            reply = "I'm not sure I understand. Try asking about 'bugs', 'tasks', 'users', or 'releases'."
+
+        return {
+            "status": "success",
+            "reply": reply
+        }
+    except Exception as e:
+        print(f"Agent error: {e}")
+        return {
+            "status": "error", 
+            "reply": f"Sorry, I encountered an internal error: {str(e)}"
+        }
+
+
 
 @app.get("/api/priority-stats")
 async def get_priority_stats():
@@ -1158,16 +1760,31 @@ async def get_priority_stats():
 
 # ---------- GET BUG DETAILS ----------
 
-@app.get("/api/bugs/{bug_id}")
-async def get_bug_details(bug_id: str = Path(...)):
-    try:
-        bug_data = None
+def _get_bug_by_id(bug_id: str):
+    bug_data = None
 
-        for name in CANDIDATE_TABLES:
-            try:
+    for name in CANDIDATE_TABLES:
+        try:
+            params = {
+                "select": "*",
+                "Bug ID": f"eq.{bug_id}",
+            }
+            resp = requests.get(
+                f"{SUPABASE_REST_URL}/{name}",
+                headers=_supabase_headers(),
+                params=params,
+                timeout=10,
+            )
+
+            if resp.ok and resp.json():
+                bug_data = resp.json()[0]
+                break
+
+            # if bug_id is numeric, try int
+            if bug_id.isdigit():
                 params = {
                     "select": "*",
-                    "Bug ID": f"eq.{bug_id}",
+                    "Bug ID": f"eq.{int(bug_id)}",
                 }
                 resp = requests.get(
                     f"{SUPABASE_REST_URL}/{name}",
@@ -1175,33 +1792,24 @@ async def get_bug_details(bug_id: str = Path(...)):
                     params=params,
                     timeout=10,
                 )
-
                 if resp.ok and resp.json():
                     bug_data = resp.json()[0]
                     break
+        except Exception:
+            continue
 
-                # if bug_id is numeric, try int
-                if bug_id.isdigit():
-                    params = {
-                        "select": "*",
-                        "Bug ID": f"eq.{int(bug_id)}",
-                    }
-                    resp = requests.get(
-                        f"{SUPABASE_REST_URL}/{name}",
-                        headers=_supabase_headers(),
-                        params=params,
-                        timeout=10,
-                    )
-                    if resp.ok and resp.json():
-                        bug_data = resp.json()[0]
-                        break
-            except Exception:
-                continue
+    if not bug_data:
+        return None
 
-        if not bug_data:
+    return normalize_bug_row(bug_data)
+
+
+@app.get("/api/bugs/{bug_id}")
+async def get_bug_details(bug_id: str = Path(...)):
+    try:
+        normalized = _get_bug_by_id(bug_id)
+        if not normalized:
             raise HTTPException(status_code=404, detail="Bug not found")
-
-        normalized = normalize_bug_row(bug_data)
 
         return {"status": "success", "data": normalized}
 
@@ -2566,8 +3174,10 @@ async def create_task(request: Request):
                 "created_at": now_iso
             }
             resp1 = supabase.table("tasks").insert(base, returning="representation").execute()
-            if getattr(resp1, "error", None):
-                raise HTTPException(status_code=400, detail=str(resp1.error))
+            error = getattr(resp1, "error", None)
+            if error:
+                print(f"[ERROR] Supabase insert error: {error}")
+                raise HTTPException(status_code=400, detail=str(error))
             
             inserted_rows = getattr(resp1, "data", []) or []
             if not inserted_rows:
@@ -2586,10 +3196,12 @@ async def create_task(request: Request):
         except HTTPException:
             raise
         except Exception as e:
+            print(f"[ERROR] Task creation failed: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
+        print(f"[ERROR] Request parsing failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

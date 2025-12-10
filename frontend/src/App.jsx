@@ -12,6 +12,7 @@ import TestingRequests from './pages/TestingRequests';
 import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import { AuthProvider } from "./hooks/useAuth";
+import AgentPage from "./pages/AgentPage";
 
 function App() {
   return (
@@ -32,121 +33,134 @@ function App() {
           }
         />
 
-      {/* -------------------- BUGS MODULE -------------------- */}
-      <Route
-        path="/bugs"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <BugsPage />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
+        {/* -------------------- BUGS MODULE -------------------- */}
+        <Route
+          path="/bugs"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <BugsPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
 
-      {/* -------------------- TASKS MODULE -------------------- */}
-      <Route
-        path="/tasks"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <TasksList />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/tasks/new"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <TaskForm />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/tasks/:id"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <TaskDetails />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
+        {/* -------------------- TASKS MODULE -------------------- */}
+        <Route
+          path="/tasks"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <TasksList />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tasks/new"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <TaskForm />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tasks/:id"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <TaskDetails />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
 
-      {/* -------------------- USERS -------------------- */}
-      <Route
-        path="/users"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <UsersPage />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
+        {/* -------------------- USERS -------------------- */}
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <UsersPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
 
-      {/* -------------------- PERMISSIONS -------------------- */}
-      <Route
-        path="/permissions"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <PermissionsPage />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
+        {/* -------------------- PERMISSIONS -------------------- */}
+        <Route
+          path="/permissions"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <PermissionsPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
 
-      {/* -------------------- SETTINGS -------------------- */}
-      <Route
-        path="/settings"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <Settings />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
+        {/* -------------------- SETTINGS -------------------- */}
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <Settings />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
 
-      
 
-      {/* -------------------- TRANSTRACKER -------------------- */}
-      <Route
-        path="/transtracker"
-        element={
-          <ProtectedRoute>
-            <MainLayout>
-              <Transtracker />
-            </MainLayout>
-          </ProtectedRoute>
-        }
-      />
 
-      {/* -------------------- TESTING REQUESTS -------------------- */}
-      <Route
-        path="/testing-requests"
-        element={
-          <ProtectedRoute>
+        {/* -------------------- TRANSTRACKER -------------------- */}
+        <Route
+          path="/transtracker"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <Transtracker />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* -------------------- TESTING REQUESTS -------------------- */}
+        <Route
+          path="/testing-requests"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <TestingRequests />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* -------------------- AGENT MODULE -------------------- */}
+        <Route
+          path="/agent"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <AgentPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* -------------------- FALLBACK -------------------- */}
+        <Route
+          path="*"
+          element={
             <MainLayout>
-              <TestingRequests />
+              <Dashboard />
             </MainLayout>
-          </ProtectedRoute>
-        }
-      />
-      {/* -------------------- FALLBACK -------------------- */}
-      <Route
-        path="*"
-        element={
-          <MainLayout>
-            <Dashboard />
-          </MainLayout>
-        }
-      />
-    </Routes>
+          }
+        />
+      </Routes>
     </AuthProvider>
   );
 }

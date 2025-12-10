@@ -9,6 +9,7 @@ import {
   ChevronRight,
   LayoutDashboard,
   Key,
+  Sparkles as SparklesIcon,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
@@ -47,6 +48,7 @@ export default function TopNav({ open, onClose }) {
 
   const navItems = [
     { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+    { to: "/agent", icon: SparklesIcon, label: "AI Agent" },
     { to: "/bugs", icon: Bug, label: "Bugs" },
     { to: "/tasks", icon: ListTodo, label: "Tasks" },
     { to: "/transtracker", icon: ListTodo, label: "Transtracker" },

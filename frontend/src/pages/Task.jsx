@@ -244,8 +244,18 @@ export function TasksList() {
             };
           });
           setRows(rowsMapped);
+          setFormOpen(false);
+          setFormData({
+            title: "",
+            description: "",
+            assignedTo: "",
+            priority: "medium",
+            status: "todo",
+            dueDate: new Date().toISOString().slice(0, 10),
+          });
         })
         .catch((err) => {
+          console.error("Task save error:", err);
           alert(err.message || "Failed to save task");
         });
     } else {

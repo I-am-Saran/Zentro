@@ -19,6 +19,7 @@ async function request(path, options = {}) {
     const msg =
       (body && typeof body === "object" && (body.detail || body.message)) ||
       (typeof body === "string" ? body : "Request failed");
+    console.error(`[API Error] ${path}: ${msg}`, body);
     throw new Error(msg);
   }
   return body;
@@ -29,6 +30,7 @@ export async function get(path) {
 }
 
 export async function post(path, data) {
+  console.log(`[API POST] ${path}:`, data);
   return request(path, { method: "POST", body: JSON.stringify(data) });
 }
 
@@ -39,3 +41,4 @@ export async function put(path, data) {
 export async function del(path) {
   return request(path, { method: "DELETE" });
 }
+
